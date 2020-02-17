@@ -13,7 +13,7 @@ import numpy as np
 import gudhi as gd
 import SimpleITK as sitk
 import matplotlib.pyplot as plt
-from topologylayer.nn import (LevelSetLayer1D, PartialSumBarcodeLengths,
+from topologylayer.nn import (PartialSumBarcodeLengths,
                               SumBarcodeLengths, TopKBarcodeLengths)
 from utils import *
 from topologylayer.nn.levelset import *
