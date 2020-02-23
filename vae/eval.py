@@ -28,7 +28,7 @@ parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='enables CUDA')
 parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
-parser.add_argument('--constrain', '-c', type=bool, default=False, help='topo con')
+parser.add_argument('--constrain', '-c', action='store_true', default=False, help='topo con')
 parser.add_argument('--mode', type=int, default=0,
                     help='[mode: process] = [0: artificial], [1: real]')
 args = parser.parse_args()

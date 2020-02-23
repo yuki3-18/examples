@@ -46,6 +46,8 @@ parser.add_argument('--model', type=str, default="",
                     help='File path of loaded model')
 parser.add_argument('--latent_dim', type=int, default=24,
                     help='dimension of latent space')
+parser.add_argument('--patient', type=int, default=10,
+                    help='epochs for early stopping')
 args = parser.parse_args()
 
 args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -329,9 +331,9 @@ def val(epoch):
 
 if __name__ == "__main__":
     val_loss_min = 1000
-    min_delta = 0.001
     epochs_no_improve = 0
-    n_epochs_stop = 3
+    min_delta = 0.001
+    n_epochs_stop = args.patient
     for epoch in trange(1, args.epochs + 1):
         train_loss = train(epoch)
         val_loss = val(epoch)
