@@ -22,7 +22,7 @@ from topologylayer.nn import *
 # from topologylayer.functional.utils_dionysus import *
 
 parser = argparse.ArgumentParser(description='VAE')
-parser.add_argument('--input', type=str, default="E:/git/pytorch/vae/input/s100/filename.txt",
+parser.add_argument('--input', type=str, default="tip/",
                     help='File path of input images')
 parser.add_argument('--batch-size', type=int, default=128, metavar='N',
                     help='input batch size for training (default: 128)')
@@ -36,8 +36,8 @@ parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                     help='how many batches to wait before logging training status')
 parser.add_argument('--beta', type=float, default=0.1, metavar='B',
                     help='beta')
-parser.add_argument('--ramda', type=float, default=0, metavar='R',
-                    help='ramda')
+parser.add_argument('--lam', type=float, default=0, metavar='R',
+                    help='lambda')
 parser.add_argument('--topo', '-t', action='store_true', default=False, help='topo')
 parser.add_argument('--constrain', '-c', action='store_true', default=False, help='topo con')
 parser.add_argument('--mode', type=int, default=0,
@@ -60,26 +60,28 @@ viz = Visdom()
 
 image_size = 9
 
+data_path = os.path.join("./input/", args.input, "filename.txt")
+
 if args.mode==0:
     num_of_data = 10000
     num_of_test = 2000
     num_of_val = 2000
-    outdir = "./results/artificial/z_{}/B_{}/R_{}/".format(args.latent_dim, args.beta, args.ramda)
+    outdir = os.path.join("./results/artificial/", args.input, "z_{}/B_{}/L_{}/".format(args.latent_dim, args.beta, args.lam))
 elif args.constrain==True:
     num_of_data = 1978
     num_of_test = 467
     num_of_val = 425
-    outdir = "./results/CT/con/z_{}/B_{}/R_{}/".format(args.latent_dim, args.beta, args.ramda)
+    outdir = "./results/CT/con/z_{}/B_{}/L_{}/".format(args.latent_dim, args.beta, args.lam)
 elif args.mode==1:
     num_of_data = 3039
     num_of_test = 607
     num_of_val = 607
-    outdir = "./results/CT/z_{}/B_{}/R_{}/".format(args.latent_dim, args.beta, args.ramda)
+    outdir = "./results/CT/z_{}/B_{}/L_{}/".format(args.latent_dim, args.beta, args.lam)
 else:
     num_of_data = 10000
     num_of_test = 2000
     num_of_val = 2000
-    outdir = "./results/debug/".format(args.latent_dim, args.beta, args.ramda)
+    outdir = "./results/debug/".format(args.latent_dim, args.beta, args.lam)
 
 
 writer = SummaryWriter(log_dir=outdir+"logs")
@@ -92,7 +94,7 @@ with open(os.path.join(outdir, "params.json"), mode="w") as f:
     json.dump(args.__dict__, f, indent=4)
 
 print('load data')
-list = io.load_list(args.input)
+list = io.load_list(data_path)
 data_set = np.zeros((len(list), image_size, image_size, image_size))
 
 for i in trange(len(list)):
@@ -160,7 +162,7 @@ class VAE(nn.Module):
 if args.model:
     with open(args.model, 'rb') as f:
         model = cloudpickle.load(f).to(device)
-    summary(model, (1,9*9*9))
+    summary(model, (1, 9*9*9))
 else:
     model = VAE(args.latent_dim).to(device)
 
@@ -175,7 +177,7 @@ def loss_function(recon_x, x, mu, logvar):
 
     # BCE = F.binary_cross_entropy(recon_x, x.view(-1, 729), reduction='sum')
     MSE = F.mse_loss(recon_x, x, size_average=False).div(batch_size)
-    MSE = MSE*feature_size
+    SE = MSE*feature_size
     # see Appendix B from VAE paper:
     # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
     # https://arxiv.org/abs/1312.6114
@@ -185,12 +187,12 @@ def loss_function(recon_x, x, mu, logvar):
 
     if args.topo==True:
         topo, b01, b0, b1, b2 = topological_loss(recon_x, x)
-        topo, b01, b0, b1, b2 = topo*args.ramda, b01*args.ramda, b0*args.ramda, b1*args.ramda, b2*args.ramda
-        total_loss = MSE + KLD + topo
-        return total_loss, MSE, KLD, topo, b01, b0, b1, b2
+        topo, b01, b0, b1, b2 = topo*args.lam, b01*args.lam, b0*args.lam, b1*args.lam, b2*args.lam
+        total_loss = SE + KLD + topo
+        return total_loss, SE, KLD, topo, b01, b0, b1, b2
     else:
-        total_loss = MSE + KLD
-        return total_loss, MSE, KLD
+        total_loss = SE + KLD
+        return total_loss, SE, KLD
 
 
 def topological_loss(recon_x, x):
@@ -362,7 +364,7 @@ if __name__ == "__main__":
 
         # Check early stopping condition
         if epochs_no_improve >= n_epochs_stop:
-            print('Early stopping!')
+            print('-'*20, 'Early stopping!', '-'*20)
             break
 
     writer.close()

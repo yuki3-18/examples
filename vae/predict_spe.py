@@ -28,14 +28,14 @@ from importlib import machinery
 parser = argparse.ArgumentParser(description='VAE test')
 parser.add_argument('--input', type=str, default="E:/git/TFRecord_example/input/CT/patch/size9/cc1/filename.txt",
                     help='File path of input images')
-parser.add_argument('--model', type=str, default="E:/git/pytorch/vae/results/z_24/B_0.1/R_0.005/model.pkl",
+parser.add_argument('--model', type=str, default="E:/git/pytorch/vae/results/z_24/B_0.1/L_0.005/model.pkl",
                     help='File path of model')
 parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='enables CUDA')
 parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
 parser.add_argument('--constrain', '-c', type=bool, default=False, help='topo con')
-parser.add_argument('--outdir', type=str, default="E:/git/pytorch/vae/results/z_24/B_0.1/R_0.005/",
+parser.add_argument('--outdir', type=str, default="E:/git/pytorch/vae/results/z_24/B_0.1/L_0.005/",
                     help='File path of output images')
 parser.add_argument('--mode', type=int, default=1,
                     help='[mode: process] = [0: artificial], [1: real]')
