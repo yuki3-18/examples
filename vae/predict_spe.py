@@ -26,24 +26,24 @@ import pickle
 from importlib import machinery
 
 parser = argparse.ArgumentParser(description='VAE test')
-parser.add_argument('--input', type=str, default="E:/git/TFRecord_example/input/CT/patch/size9/cc1/filename.txt",
+parser.add_argument('--input', type=str, default="E:/git/pytorch/vae/input/tip/filename.txt",
                     help='File path of input images')
-parser.add_argument('--model', type=str, default="E:/git/pytorch/vae/results/z_24/B_0.1/L_0.005/model.pkl",
+parser.add_argument('--model', type=str, default="E:/git/pytorch/vae/results/artificial/tip/z_3/B_0/L_0/model.pkl",
                     help='File path of model')
 parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='enables CUDA')
 parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
 parser.add_argument('--constrain', '-c', type=bool, default=False, help='topo con')
-parser.add_argument('--outdir', type=str, default="E:/git/pytorch/vae/results/z_24/B_0.1/L_0.005/",
+parser.add_argument('--outdir', type=str, default="E:/git/pytorch/vae/results/artificial/tip/z_3/B_0/L_0/",
                     help='File path of output images')
-parser.add_argument('--mode', type=int, default=1,
+parser.add_argument('--mode', type=int, default=0,
                     help='[mode: process] = [0: artificial], [1: real]')
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
 
 patch_side = 9
-latent_dim = 24
+latent_dim = 3
 
 if args.mode==0:
     num_of_data = 10000
@@ -95,7 +95,7 @@ mean = []
 std = []
 mean_single = []
 std_single = []
-num_of_gen = 5000
+num_of_gen = 2000
 patch_side = 9
 
 

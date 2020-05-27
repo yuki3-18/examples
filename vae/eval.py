@@ -6,6 +6,7 @@
 import os
 import argparse
 import torch
+from torchsummary import summary
 import torch.utils.data
 import cloudpickle
 from tqdm import trange, tqdm
@@ -20,15 +21,18 @@ from topologylayer.nn.levelset import *
 from tqdm import trange
 
 parser = argparse.ArgumentParser(description='VAE test')
-parser.add_argument('--input', type=str, default="E:/git/pytorch/vae/input/s100/filename.txt",
+parser.add_argument('--input', type=str, default='./input/tip/filename.txt',
                     help='File path of input images')
-parser.add_argument('--outdir', type=str, default="E:/git/pytorch/vae/results/debug/",
+parser.add_argument('--outdir', type=str, default='./results/',
                     help='File path of output images')
+parser.add_argument('--latent_dim', type=int, default=3,
+                    help='dimension of latent space')
 parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='enables CUDA')
 parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
 parser.add_argument('--constrain', '-c', action='store_true', default=False, help='topo con')
+parser.add_argument('--PH', '-ph', action='store_true', default=False, help='PH calculation')
 parser.add_argument('--mode', type=int, default=0,
                     help='[mode: process] = [0: artificial], [1: real]')
 args = parser.parse_args()
@@ -47,20 +51,29 @@ else:
     num_of_test = 607
     num_of_val = 607
 
+# settings
 patch_side = 9
-latent_dim = 24
+patch_center = int(patch_side/2 - 0.5)
+latent_dim = args.latent_dim
+n_sample = 2000
 
 torch.manual_seed(args.seed)
 
-device = torch.device("cuda" if args.cuda else "cpu")
+device = torch.device('cuda' if args.cuda else 'cpu')
 
-# check folder
-if not (os.path.exists(args.outdir + 'gen')):
-    os.makedirs(args.outdir + 'gen/ori/')
-    os.makedirs(args.outdir + 'gen/rec/')
-    os.makedirs(args.outdir + 'spe/')
+# set path
+gen_path = os.path.join(args.outdir, 'gen')
+gen_ori_path = os.path.join(gen_path, 'ori')
+gen_rec_path = os.path.join(gen_path, 'rec')
+gen_topo_path = os.path.join(gen_path, 'topo')
+spe_path = os.path.join(args.outdir, 'spe')
+spe_ori_path = os.path.join(spe_path, 'ori')
+spe_topo_path = os.path.join(spe_path, 'topo')
+os.makedirs(gen_ori_path, exist_ok=True)
+os.makedirs(gen_rec_path, exist_ok=True)
+os.makedirs(spe_ori_path, exist_ok=True)
 
-model_path = args.outdir+"model.pkl"
+model_path = os.path.join(args.outdir, 'model.pkl')
 
 # get data
 data_set = get_dataset(args.input, patch_side, num_of_data)
@@ -70,7 +83,7 @@ test = data[:num_of_test]
 
 # divide data
 test_data = torch.from_numpy(test).float()
-train_data = torch.from_numpy(data[num_of_test+num_of_val:]).float().to(device)
+train_data = torch.from_numpy(data[num_of_test+num_of_val:]).float()
 train_loader = torch.utils.data.DataLoader(train_data,
                           batch_size=train_data.size(0),
                           shuffle=False,
@@ -78,7 +91,7 @@ train_loader = torch.utils.data.DataLoader(train_data,
                           pin_memory=False,
                           drop_last=False)
 test_loader = torch.utils.data.DataLoader(test_data,
-                          batch_size=1,
+                          batch_size=test_data.size(0),
                           shuffle=False,
                           num_workers=0,
                           pin_memory=False,
@@ -86,159 +99,189 @@ test_loader = torch.utils.data.DataLoader(test_data,
 # load model
 with open(model_path, 'rb') as f:
     model = cloudpickle.load(f)
+summary(model, (1, patch_side**3))
 
 def gen(model):
-    model.eval()
-    with torch.no_grad():
-        file_ori = open(args.outdir + 'gen/ori/list.txt', 'w')
-        file_rec = open(args.outdir + 'gen/rec/list.txt', 'w')
-        # original = []
-        # reconstruction = []
-        bar01 = []
-        bar0 = []
-        bar1 = []
-        bar2 = []
-        bar01_o = []
-        bar0_o = []
-        bar1_o = []
-        bar2_o = []
-
-        for i, data in enumerate(tqdm(test_loader)):
-            # print(i)
-            data = data.to(device)
-            recon_batch, mu, logvar = model(data)
-            # ori_single = data[0, :]
-            rec_single = recon_batch[0, :]
-            # original = ori_single.cpu().numpy()
-            reconstruction = rec_single.cpu().numpy()
-
-    # ori = np.reshape(ori, [num_of_test, patch_side, patch_side, patch_side])
-    # rec = np.reshape(rec, [num_of_test, patch_side, patch_side, patch_side])
-            ori = np.reshape(test[i], [patch_side, patch_side, patch_side])
-            rec = np.reshape(reconstruction, [patch_side, patch_side, patch_side])
-            generalization = []
-        # for j in trange(len(rec)):
-            # EUDT
-            ori_image = sitk.GetImageFromArray(ori)
-            ori_image.SetOrigin([0, 0, 0])
-            ori_image.SetSpacing([0.885, 0.885, 1])
-
-            rec_image = sitk.GetImageFromArray(rec)
-            rec_image.SetOrigin([0, 0, 0])
-            rec_image.SetSpacing([0.885, 0.885, 1])
-
-            # output image
-            io.write_mhd_and_raw(ori_image, '{}.mhd'.format(os.path.join(args.outdir, 'gen/ori', '{}'.format(str(i).zfill(4)))))
-            io.write_mhd_and_raw(rec_image, '{}.mhd'.format(os.path.join(args.outdir, 'gen/rec', '{}'.format(str(i).zfill(4)))))
-            file_ori.write('{}.mhd'.format(os.path.join(args.outdir, 'gen/ori', '{}'.format(str(i).zfill(4)))) + "\n")
-            file_rec.write('{}.mhd'.format(os.path.join(args.outdir, 'gen/rec', '{}'.format(str(i).zfill(4)))) + "\n")
-
-            # calculate generalization
-            generalization.append(L1norm(ori, rec))
-
-            # calculate PH
-            b01, b0, b1, b2 = PH(rec)
-            bar01.append(b01.item())
-            bar0.append(b0.item())
-            bar1.append(b1.item())
-            bar2.append(b2.item())
-            # calculate PH
-            b01_o, b0_o, b1_o, b2_o = PH(ori)
-            bar01_o.append(b01_o.item())
-            bar0_o.append(b0_o.item())
-            bar1_o.append(b1_o.item())
-            bar2_o.append(b2_o.item())
-
-    file_ori.close()
-    file_rec.close()
-    bar = [bar01, bar0, bar1, bar2]
-    bar = np.transpose(bar)
-    bar_o = [bar01_o, bar0_o, bar1_o, bar2_o]
-    bar_o = np.transpose(bar_o)
-
-    # # plot reconstruction
-    # a_X = ori[4, :]
-    # a_Xe = rec[4, :]
-    # c_X = ori[:, :, 4, :]
-    # c_Xe = rec[:, :, 4, :]
-    # s_X = ori[:, :, :, 4]
-    # s_Xe = rec[:, :, :, 4]
-    # visualize_slices(a_X, a_Xe, args.outdir + "gen/axial_")
-    # visualize_slices(c_X, c_Xe, args.outdir + "gen/coronal_")
-    # visualize_slices(s_X, s_Xe, args.outdir + "gen/sagital_")
-    return generalization, bar, bar_o
-
-# testing
-def spe(model):
-    specificity = []
-    mean = []
-    std = []
-    mean_single = []
-    std_single = []
+    file_ori = open(os.path.join(gen_ori_path, 'list.txt'), 'w')
+    file_rec = open(os.path.join(gen_rec_path, 'list.txt'), 'w')
     bar01 = []
     bar0 = []
     bar1 = []
     bar2 = []
+    bar01_o = []
+    bar0_o = []
+    bar1_o = []
+    bar2_o = []
+    score = []
+
+    model.eval()
+    with torch.no_grad():
+        test_data_cuda = test_data.to(device)
+        rec_batch, mu, logvar = model(test_data_cuda)
+        rec_batch = rec_batch.cpu().numpy()
+        test = test_data.numpy()
+        generalization = np.double(np.mean(abs(rec_batch - test), axis=1))
+
+        rec_batch = np.reshape(rec_batch,[num_of_test, patch_side, patch_side, patch_side])
+        test = np.reshape(test, [num_of_test, patch_side, patch_side, patch_side])
+
+        for i in trange(num_of_test):
+            ori = test[i]
+            # ori = np.reshape(test[i], [patch_side, patch_side, patch_side])
+            ori_img = sitk.GetImageFromArray(ori)
+            ori_img.SetOrigin([0, 0, 0])
+            ori_img.SetSpacing([0.885, 0.885, 1])
+
+            rec = rec_batch[i]
+            # rec = np.reshape(rec_batch[i], [patch_side, patch_side, patch_side])
+            rec_img = sitk.GetImageFromArray(rec)
+            rec_img.SetOrigin([0, 0, 0])
+            rec_img.SetSpacing([0.885, 0.885, 1])
+
+            # output image
+            io.write_mhd_and_raw(ori_img, '{}.mhd'.format(os.path.join(gen_ori_path, '{}'.format(str(i).zfill(4)))))
+            io.write_mhd_and_raw(rec_img, '{}.mhd'.format(os.path.join(gen_rec_path, '{}'.format(str(i).zfill(4)))))
+            file_ori.write('{}.mhd'.format(os.path.join(gen_ori_path, '{}'.format(str(i).zfill(4)))) + '\n')
+            file_rec.write('{}.mhd'.format(os.path.join(gen_rec_path, '{}'.format(str(i).zfill(4)))) + '\n')
+
+            if args.PH == True:
+                # calculate PH of original image
+                # b01_o, b0_o, b1_o, b2_o = PH(ori)
+                # bar01_o.append(b01_o.item())
+                # bar0_o.append(b0_o.item())
+                # bar1_o.append(b1_o.item())
+                # bar2_o.append(b2_o.item())
+                # calculate PH of reconstruction
+                b01, b0, b1, b2 = PH(rec)
+                bar01.append(b01.item())
+                bar0.append(b0.item())
+                bar1.append(b1.item())
+                bar2.append(b2.item())
+                # calculate score
+                s = (1.0 - b01.item()**2) + b0.item()**2 + b1.item()**2 + b2.item()**2
+                score.append([s])
+
+    file_ori.close()
+    file_rec.close()
+
+    # transpose bar
+    bar = [bar01, bar0, bar1, bar2]
+    bar_o = [bar01_o, bar0_o, bar1_o, bar2_o]
+    if args.PH == True:
+        bar = np.transpose(bar)
+        bar_o = np.transpose(bar_o)
+        score = np.array(score).flatten()
+        i_min = score.argmin()
+        i_max = score.argmax()
+        print(i_min)
+        save_PH_diag(test[i_min], os.path.join(gen_topo_path, 'min', 'ori{}'.format(str(i_min).zfill(4))))
+        save_PH_diag(rec_batch[i_min], os.path.join(gen_topo_path, 'min', 'rec{}'.format(str(i_min).zfill(4))))
+        save_PH_diag(test[i_max], os.path.join(gen_topo_path, 'max', 'ori{}'.format(str(i_max).zfill(4))))
+        save_PH_diag(rec_batch[i_max], os.path.join(gen_topo_path, 'max', 'rec{}'.format(str(i_max).zfill(4))))
+
+    # plot reconstruction
+    a_X = test[:, patch_center, :]
+    a_Xe = rec_batch[:, patch_center, :]
+    c_X = test[:, :, patch_center, :]
+    c_Xe = rec_batch[:, :, patch_center, :]
+    s_X = test[:, :, :, patch_center]
+    s_Xe = rec_batch[:, :, :, patch_center]
+    visualize_slices(a_X, a_Xe, args.outdir + 'gen/axial_')
+    visualize_slices(c_X, c_Xe, args.outdir + 'gen/coronal_')
+    visualize_slices(s_X, s_Xe, args.outdir + 'gen/sagital_')
+
+    return generalization, bar, bar_o
+
+
+def spe(model):
+    specificity = []
+    bar01 = []
+    bar0 = []
+    bar1 = []
+    bar2 = []
+    score = []
+    sample = []
+    id = []
+
+    model.eval()
     #  calculate mu and sigma
     with torch.no_grad():
         train_data_cuda = train_data.to(device)
         recon_batch, mean, logvar = model(train_data_cuda)
-    mu = mean.mean().item()
-    sigma = (torch.exp(0.5 * logvar)).mean().item()
+        # mu = mean.mean().item()
+        # sigma = (torch.exp(0.5 * logvar)).mean().item()
+        mean = torch.mean(mean, 0)
+        std = torch.mean(torch.exp(0.5 * logvar), 0)
 
-    # for i in enumerate(train_loader):
-    #     with torch.no_grad():
-    #         train_data_cuda = train_data.to(device)
-    #         recon_batch, mean_batch, logvar_batch = model(train_data_cuda)
-    #         mean_single = mean_batch[0, :]
-    #         std_single = torch.exp(0.5 * logvar_batch)[0, :]
-    #         mean.append(mean_single.cpu().numpy())
-    #         std.append(std_single.cpu().numpy())
+        file_spe = open(os.path.join(spe_path, 'list.txt'), 'w')
+        file_spe_ori = open(os.path.join(spe_ori_path, 'list.txt'), 'w')
 
-    # mu = np.mean(mean)
-    # sigma = np.mean(std)
-
-    model.eval()
-    file_gen = open(args.outdir + 'spe/list.txt', 'w')
-    with torch.no_grad():
         ori = np.reshape(test, [num_of_test, patch_side, patch_side, patch_side])
-        for j in trange(2000):
-            # sample_z = np.random.normal(mu, sigma, (1, latent_dim))
-            sample_z = torch.normal(mu, sigma, (1, latent_dim)).to(device)
-            gen_batch = model.decode(sample_z)
-            gen_single = gen_batch.cpu().numpy()
-            gen = np.reshape(gen_single, [patch_side, patch_side, patch_side])
-            # EUDT
-            eudt_image = sitk.GetImageFromArray(gen)
-            eudt_image.SetSpacing([0.885, 0.885, 1])
-            eudt_image.SetOrigin([0, 0, 0])
+
+        for j in trange(n_sample):
+            eps = torch.randn_like(std)
+            sample_z = mean + std * eps
+            # sample_z = torch.normal(mu, sigma, (1, latent_dim)).to(device)
+            sam_batch = model.decode(sample_z)
+            sam_single = sam_batch.cpu().numpy()
+            sample.append(sam_single)
+            sam = np.reshape(sam_single, [patch_side, patch_side, patch_side])
 
             # calculate spe
             case_min_specificity = 1.0
             for image_index in range(num_of_test):
-                specificity_tmp = L1norm(ori[image_index] ,gen)
+                specificity_tmp = L1norm(ori[image_index] ,sam)
                 if specificity_tmp < case_min_specificity:
                     case_min_specificity = specificity_tmp
+                    index = image_index
+
             specificity.append([case_min_specificity])
+            id.append([index])
+
+            # EUDT
+            # ori_img = sitk.GetImageFromArray(ori[index])
+            # ori_img.SetSpacing([0.885, 0.885, 1])
+            # ori_img.SetOrigin([0, 0, 0])
+
+            sam_img = sitk.GetImageFromArray(sam)
+            sam_img.SetSpacing([0.885, 0.885, 1])
+            sam_img.SetOrigin([0, 0, 0])
 
             # output image
-            io.write_mhd_and_raw(eudt_image, '{}.mhd'.format(os.path.join(args.outdir, 'spe', '{}'.format(str(j).zfill(4)))))
-            file_gen.write('{}.mhd'.format(os.path.join(args.outdir, 'spe', '{}'.format(str(j).zfill(4)))) + "\n")
-            # calculate PH
-            b01, b0, b1, b2 = PH(gen)
-            bar01.append(b01.item())
-            bar0.append(b0.item())
-            bar1.append(b1.item())
-            bar2.append(b2.item())
+            # io.write_mhd_and_raw(ori_img, '{}.mhd'.format(os.path.join(spe_path, 'ori', '{}'.format(str(index).zfill(4)))))
+            io.write_mhd_and_raw(sam_img, '{}.mhd'.format(os.path.join(spe_path, '{}'.format(str(j).zfill(4)))))
+            file_spe.write('{}.mhd'.format(os.path.join(spe_path, '{}'.format(str(j).zfill(4)))) + '\n')
+            file_spe_ori.write('{}.mhd'.format(os.path.join(gen_path, '/ori/', '{}'.format(str(index).zfill(4)))) + '\n')
 
-        bar = [bar01, bar0, bar1, bar2]
+            if args.PH == True:
+                # calculate PH
+                b01, b0, b1, b2 = PH(sam)
+                bar01.append(b01.item())
+                bar0.append(b0.item())
+                bar1.append(b1.item())
+                bar2.append(b2.item())
+                s = (1.0 - b01.item()**2) + b0.item()**2 + b1.item()**2 + b2.item()**2
+                score.append([s])
+    file_spe.close()
+
+    bar = [bar01, bar0, bar1, bar2]
+    if args.PH == True:
         bar = np.transpose(bar)
-        file_gen.close()
+        score = np.array(score).flatten()
+        id = np.array(id).flatten()
+        i_min = score.argmin()
+        i_max = score.argmax()
+
+        save_PH_diag(ori[id[i_min]], os.path.join(spe_topo_path, 'min', 'ori{}'.format(str(id[i_min][0]).zfill(4))))
+        save_PH_diag(sample[i_min], os.path.join(spe_topo_path, 'min', 'sam{}'.format(str(i_min).zfill(4))))
+        save_PH_diag(ori[id[i_max]], os.path.join(spe_topo_path, 'max', 'ori{}'.format(str(id[i_max][0]).zfill(4))))
+        save_PH_diag(sample[i_max], os.path.join(spe_topo_path, 'max', 'sam{}'.format(str(i_max).zfill(4))))
 
     return specificity, bar
 
 def PH(data):
     z, y, x = data.shape
+    # data = np.ndarray(data, [z, y, x])
     cpx = init_tri_complex_3d(z, y, x)
     layer = LevelSetLayer(cpx, maxdim=2, sublevel=False)
     dgminfo = layer(torch.from_numpy(data).float())
@@ -252,18 +295,24 @@ def PH(data):
     b2 = f2(dgminfo)
     return b01, b0, b1, b2
 
-if __name__ == "__main__":
+if __name__ == '__main__':
 
     # generalization
+    print('-' * 20, 'Computing Generalization', '-' * 20)
     generalization, bar, bar_o = gen(model)
     print('generalization = %f' % np.mean(generalization))
-    np.savetxt(os.path.join(args.outdir, 'generalization.csv'), generalization, delimiter=",")
-    np.savetxt(os.path.join(args.outdir, 'gen_topo.csv'), bar, delimiter=",")
-    np.savetxt(os.path.join(args.outdir, 'ori_topo.csv'), bar_o, delimiter=",")
+    np.savetxt(os.path.join(args.outdir, 'generalization.csv'), generalization, delimiter=',')
+    if args.PH == True:
+        np.savetxt(os.path.join(args.outdir, 'gen_topo.csv'), bar, delimiter=',')
+        # np.savetxt(os.path.join(args.outdir, 'ori_topo.csv'), bar_o, delimiter=',')
 
     # specificity
+    print('-' * 20, 'Computing Specificity', '-' * 20)
     specificity, bar = spe(model)
     print('specificity = %f' % np.mean(specificity))
-    np.savetxt(os.path.join(args.outdir, 'specificity.csv'), specificity, delimiter=",")
-    np.savetxt(os.path.join(args.outdir, 'spe_topo.csv'), bar, delimiter=",")
+    np.savetxt(os.path.join(args.outdir, 'specificity.csv'), specificity, delimiter=',')
+    if args.PH == True:
+        np.savetxt(os.path.join(args.outdir, 'spe_topo.csv'), bar, delimiter=',')
+
+    print('-' * 20, 'Finish!', '-' * 20)
 

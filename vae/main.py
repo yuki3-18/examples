@@ -13,11 +13,11 @@ from torch.utils.tensorboard import SummaryWriter
 from visdom import Visdom
 
 import cloudpickle
-from utils import init_tri_complex_3d
 import numpy as np
 import matplotlib.pyplot as plt
 import dataIO as io
 from tqdm import trange
+from utils import init_tri_complex_3d
 from topologylayer.nn import *
 # from topologylayer.functional.utils_dionysus import *
 
@@ -34,9 +34,9 @@ parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
 parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                     help='how many batches to wait before logging training status')
-parser.add_argument('--beta', type=float, default=0.1, metavar='B',
+parser.add_argument('--beta', type=float, default=1, metavar='B',
                     help='beta')
-parser.add_argument('--lam', type=float, default=0, metavar='R',
+parser.add_argument('--lam', type=float, default=0, metavar='L',
                     help='lambda')
 parser.add_argument('--topo', '-t', action='store_true', default=False, help='topo')
 parser.add_argument('--constrain', '-c', action='store_true', default=False, help='topo con')
@@ -44,8 +44,10 @@ parser.add_argument('--mode', type=int, default=0,
                     help='[mode: process] = [0: artificial], [1: real], [2: debug]')
 parser.add_argument('--model', type=str, default="",
                     help='File path of loaded model')
-parser.add_argument('--latent_dim', type=int, default=24,
+parser.add_argument('--latent_dim', type=int, default=5,
                     help='dimension of latent space')
+parser.add_argument('--do', type=int, default=0,
+                    help='drop out rate')
 parser.add_argument('--patient', type=int, default=10,
                     help='epochs for early stopping')
 args = parser.parse_args()
@@ -58,7 +60,7 @@ device = torch.device("cuda" if args.cuda else "cpu")
 
 viz = Visdom()
 
-image_size = 9
+patch_side = 9
 
 data_path = os.path.join("./input/", args.input, "filename.txt")
 
@@ -93,14 +95,14 @@ if not (os.path.exists(outdir)):
 with open(os.path.join(outdir, "params.json"), mode="w") as f:
     json.dump(args.__dict__, f, indent=4)
 
-print('load data')
+print('-'*20, 'Data loading', '-'*20)
 list = io.load_list(data_path)
-data_set = np.zeros((len(list), image_size, image_size, image_size))
+data_set = np.zeros((len(list), patch_side, patch_side, patch_side))
 
 for i in trange(len(list)):
-    data_set[i, :] = np.reshape(io.read_mhd_and_raw(list[i]), [image_size, image_size, image_size])
+    data_set[i, :] = np.reshape(io.read_mhd_and_raw(list[i]), [patch_side, patch_side, patch_side])
 
-data = data_set.reshape(num_of_data, image_size * image_size * image_size)
+data = data_set.reshape(num_of_data, patch_side **3)
 
 
 def min_max(x, axis=None):
@@ -132,17 +134,19 @@ train_loss_list, val_loss_list = [], []
 
 
 class VAE(nn.Module):
-    def __init__(self, latent_dim):
+    def __init__(self, latent_dim, do=0):
         super(VAE, self).__init__()
 
-        self.fc1 = nn.Linear(729, 200)
+        self.fc1 = nn.Linear(patch_side**3, 200)
         self.fc21 = nn.Linear(200, latent_dim)
         self.fc22 = nn.Linear(200, latent_dim)
         self.fc3 = nn.Linear(latent_dim, 200)
-        self.fc4 = nn.Linear(200, 729)
+        self.fc4 = nn.Linear(200, patch_side**3)
+        self.dropout = torch.nn.Dropout(p=do)
 
     def encode(self, x):
         h1 = F.relu(self.fc1(x))
+        h1 = self.dropout(h1)
         return self.fc21(h1), self.fc22(h1)
 
     def reparameterize(self, mu, logvar):
@@ -152,19 +156,20 @@ class VAE(nn.Module):
 
     def decode(self, z):
         h3 = F.relu(self.fc3(z))
+        h3 = self.dropout(h3)
         return torch.sigmoid(self.fc4(h3))
 
     def forward(self, x):
-        mu, logvar = self.encode(x.view(-1, 729))
+        mu, logvar = self.encode(x.view(-1, patch_side**3))
         z = self.reparameterize(mu, logvar)
         return self.decode(z), mu, logvar
 
 if args.model:
     with open(args.model, 'rb') as f:
         model = cloudpickle.load(f).to(device)
-    summary(model, (1, 9*9*9))
+    summary(model, (1, patch_side**3))
 else:
-    model = VAE(args.latent_dim).to(device)
+    model = VAE(args.latent_dim, args.do).to(device)
 
 optimizer = optim.Adam(model.parameters(), lr=1e-5)
 
@@ -175,7 +180,7 @@ def loss_function(recon_x, x, mu, logvar):
     feature_size = x.size(1)
     assert batch_size != 0
 
-    # BCE = F.binary_cross_entropy(recon_x, x.view(-1, 729), reduction='sum')
+    # BCE = F.binary_cross_entropy(recon_x, x.view(-1, patch_side**3), reduction='sum')
     MSE = F.mse_loss(recon_x, x, size_average=False).div(batch_size)
     SE = MSE*feature_size
     # see Appendix B from VAE paper:
@@ -201,14 +206,14 @@ def topological_loss(recon_x, x):
     b0 = 0
     b1 = 0
     b2 = 0
-    cpx = init_tri_complex_3d(9, 9, 9)
+    cpx = init_tri_complex_3d(patch_side, patch_side, patch_side)
     layer = LevelSetLayer(cpx, maxdim=2, sublevel=False)
     f01 = TopKBarcodeLengths(dim=0, k=1)
     f0 = PartialSumBarcodeLengths(dim=0, skip=1)
     f1 = SumBarcodeLengths(dim=1)
     f2 = SumBarcodeLengths(dim=2)
     for i in range(batch_size):
-        dgminfo = layer(recon_x.view(batch_size, 9, 9, 9)[i])
+        dgminfo = layer(recon_x.view(batch_size, patch_side, patch_side, patch_side)[i])
         b01 += ((1 - f01(dgminfo) ** 2)).sum()
         b0 += (f0(dgminfo) ** 2).sum()
         b1 += (f1(dgminfo) ** 2).sum()
@@ -228,7 +233,7 @@ def train(epoch):
     b0 = 0
     b1 = 0
     b2 = 0
-    MSE = 0
+    SE = 0
     KLD = 0
     topo = 0
     for batch_idx, data in enumerate(train_loader):
@@ -244,9 +249,9 @@ def train(epoch):
             b1 += l1.item()
             b2 += l2.item()
         elif args.topo==True:
-            loss, l_MSE, l_KLD, l_topo, l01, l0, l1, l2 = loss_function(recon_batch, data, mu, logvar)
+            loss, l_SE, l_KLD, l_topo, l01, l0, l1, l2 = loss_function(recon_batch, data, mu, logvar)
             train_loss += loss.item()
-            MSE += l_MSE.item()
+            SE += l_SE.item()
             KLD += l_KLD.item()
             topo += l_topo.item()
             b01 += l01.item()
@@ -254,9 +259,9 @@ def train(epoch):
             b1 += l1.item()
             b2 += l2.item()
         else:
-            loss, l_MSE, l_KLD = loss_function(recon_batch, data, mu, logvar)
+            loss, l_SE, l_KLD = loss_function(recon_batch, data, mu, logvar)
             train_loss += loss.item()
-            MSE += l_MSE.item()
+            SE += l_SE.item()
             KLD += l_KLD.item()
 
         loss.backward()
@@ -290,19 +295,20 @@ def train(epoch):
         viz.line(X=np.array([epoch]), Y=np.array([b1]), win='topo_loss', name='b1', update='append')
         viz.line(X=np.array([epoch]), Y=np.array([b2]), win='topo_loss', name='b2', update='append')
         viz.line(X=np.array([epoch]), Y=np.array([topo]), win='each_loss', name='Topo', update='append')
-    if args.mode!=2:
-        MSE /= len(train_loader.dataset)
-        KLD /= len(train_loader.dataset)
+
         writer.add_scalars("loss/each_loss", {'Train': train_loss,
-                                              'Rec': MSE,
+                                              'Rec': SE,
                                               'KL': KLD,
                                               'Topo': topo}, epoch)
+    if args.mode!=2:
+        SE /= len(train_loader.dataset)
+        KLD /= len(train_loader.dataset)
         writer.add_scalars("loss/each_loss", {'Train': train_loss,
-                                                 'Rec': MSE,
+                                                 'Rec': SE,
                                                  'KL': KLD}, epoch)
         viz.line(X=np.array([epoch]), Y=np.array([train_loss]), win='each_loss', name='train', update='append',
                  opts=dict(showlegend=True))
-        viz.line(X=np.array([epoch]), Y=np.array([MSE]), win='each_loss', name='Rec', update='append')
+        viz.line(X=np.array([epoch]), Y=np.array([SE]), win='each_loss', name='Rec', update='append')
         viz.line(X=np.array([epoch]), Y=np.array([KLD]), win='each_loss', name='KL', update='append')
 
     return train_loss
@@ -351,7 +357,7 @@ if __name__ == "__main__":
         if val_loss < val_loss_min - min_delta:
             epochs_no_improve = 0
             val_loss_min = val_loss
-            # modelの保存
+            # save model
             if epoch > args.log_interval:
                 path = os.path.join(outdir, 'weight/')
                 if not (os.path.exists(path)):

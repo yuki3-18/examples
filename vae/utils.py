@@ -8,6 +8,9 @@ import torch
 import torch.nn as nn
 from topologylayer.nn.features import pad_k
 from mpl_toolkits.mplot3d import axes3d
+from topologylayer.nn import (PartialSumBarcodeLengths,
+                              SumBarcodeLengths, TopKBarcodeLengths)
+from topologylayer.nn.levelset import LevelSetLayer
 from topologylayer.functional.persistence import SimplicialComplex
 from topologylayer.util.construction import unique_simplices
 from scipy.spatial import Delaunay
@@ -56,7 +59,7 @@ def matplotlib_plt(X, filename):
     for angle in range(0, 360):
         ax.view_init(30, angle)
         plt.draw()
-        plt.savefig(filename + "3D/{:03d}.jpg".format(angle))
+        plt.savefig(os.path.join(filename, "{:03d}.png".format(angle)))
     # plt.savefig(filename)
     # plt.show()
 
@@ -64,19 +67,19 @@ def visualize_slices(X, Xe, outdir):
     # plot reconstruction
     fig, axes = plt.subplots(ncols=10, nrows=2, figsize=(18, 4))
     for i in range(10):
-        minX = np.min(X[i, :])
-        maxX = np.max(X[i, :])
+        # minX = np.min(X[i, :])
+        # maxX = np.max(X[i, :])
         axes[0, i].imshow(X[i, :].reshape(9, 9), cmap=cm.Greys_r, vmin=0, vmax=1,
                           interpolation='none')
-        axes[0, i].set_title('original %d' % i)
+        axes[0, i].set_title('ori %d' % i)
         axes[0, i].get_xaxis().set_visible(False)
         axes[0, i].get_yaxis().set_visible(False)
 
-        minXe = np.min(Xe[i, :])
-        maxXe = np.max(Xe[i, :])
+        # minXe = np.min(Xe[i, :])
+        # maxXe = np.max(Xe[i, :])
         axes[1, i].imshow(Xe[i, :].reshape(9, 9), cmap=cm.Greys_r, vmin=0, vmax=1,
                           interpolation='none')
-        axes[1, i].set_title('reconstruction %d' % i)
+        axes[1, i].set_title('rec %d' % i)
         axes[1, i].get_xaxis().set_visible(False)
         axes[1, i].get_yaxis().set_visible(False)
     plt.savefig(outdir + "reconstruction.png")
@@ -150,11 +153,11 @@ def display_center_slices(case, size, num_data, outdir):
     fig, axes = plt.subplots(ncols=num_data, nrows=1, figsize=(num_data, 2))
     for i in range(num_data):
         axes[i].imshow(case[i, 3, :].reshape(size, size), cmap=cm.Greys_r, vmin=min, vmax=max, interpolation='none')
-        axes[i].set_title('image%d' % i)
+        axes[i].set_title('img%d' % i)
         axes[i].get_xaxis().set_visible(False)
         axes[i].get_yaxis().set_visible(False)
-    # plt.savefig(outdir + "/interpolation.png")
-    plt.show()
+    plt.savefig(os.path.join(outdir, "interpolation.png"))
+    # plt.show()
 
 def init_freudenthal_3d(width, height, depth):
     """
@@ -218,6 +221,31 @@ def diag_tidy(diag, eps=1e-1):
             new_diag.append((_, x))
     return new_diag
 
+def calc_PH(data):
+    z, y, x = data.shape
+    # data = np.ndarray(data, [z, y, x])
+    cpx = init_tri_complex_3d(z, y, x)
+    layer = LevelSetLayer(cpx, maxdim=2, sublevel=False)
+    dgminfo = layer(torch.from_numpy(data).float())
+    f01 = TopKBarcodeLengths(dim=0, k=1)
+    f0 = PartialSumBarcodeLengths(dim=0, skip=1)
+    f1 = SumBarcodeLengths(dim=1)
+    f2 = SumBarcodeLengths(dim=2)
+    b01 = f01(dgminfo).sum()
+    b0 = f0(dgminfo)
+    b1 = f1(dgminfo)
+    b2 = f2(dgminfo)
+    return b01, b0, b1, b2
+
+def compute_Betti_bumbers(img, th=0.5):
+    print(img.shape)
+    z, y, x = img.shape
+    img_v = img.flatten()
+    img_v = (img_v > th) * 1.0
+    cc = gd.CubicalComplex(dimensions=(x, y, z),
+                           top_dimensional_cells=1 - img_v)
+    print(cc.betti_numbers())
+
 def PH_diag(img, patch_side):
     cc = gd.CubicalComplex(dimensions=(patch_side, patch_side, patch_side),
                            top_dimensional_cells=1 - img.flatten())
@@ -233,25 +261,36 @@ def PH_diag(img, patch_side):
     plt.show()
     gd.plot_persistence_diagram(diag_clean, legend=True)
     plt.show()
-    gd.plot_persistence_density(diag, legend=True)
+    gd.plot_persistence_density(diag_clean, legend=True)
     plt.show()
 
-def save_PH_diag(img, patch_side, outdir):
-    cc = gd.CubicalComplex(dimensions=(patch_side, patch_side, patch_side),
+def save_PH_diag(img, outdir):
+    z, y, x = img.shape
+    os.makedirs(outdir, exist_ok=True)
+    cc = gd.CubicalComplex(dimensions=(z, y, x),
                            top_dimensional_cells=1 - img.flatten())
     diag = cc.persistence()
-    plt.figure(figsize=(3, 3))
     diag_clean = diag_tidy(diag, 1e-3)
-    print(diag_clean)
-    # np.savetxt(os.path.join(outdir, 'generalization.csv'), diag_clean, delimiter=",")
-    with open(os.path.join(outdir, 'generalization.txt'), 'wt') as f:
-        for ele in diag_clean:
-            f.write(ele + '\n')
-    gd.plot_persistence_barcode(diag_clean)
+    # print(diag_clean)
+    # np.savetxt(os.path.join(outdir, 'PH.csv'), diag_clean, delimiter=",")
+    # with open(os.path.join(outdir, 'generalization.txt'), 'wt') as f:
+    #     for ele in diag_clean:
+    #         f.write(ele + '\n')
+    fig1 = plt.figure(figsize=(3, 3))
+    gd.plot_persistence_barcode(diag_clean, max_intervals=0,inf_delta=10)
+    plt.xlim(0, 1)
     plt.ylim(-1, len(diag_clean))
     plt.xticks(ticks=np.linspace(0, 1, 6), labels=np.round(np.linspace(1, 0, 6), 2))
     plt.yticks([])
-    plt.savefig(os.path.join(outdir, "PH_diag.png"))
+    plt.savefig(os.path.join(outdir, "Persistence_barcode.png"))
+
+    fig2 = plt.figure()
+    gd.plot_persistence_diagram(diag_clean, legend=True)
+    plt.savefig(os.path.join(outdir, "Persistence_diagram.png"))
+
+    fig3 = plt.figure()
+    gd.plot_persistence_density(diag_clean, legend=True)
+    plt.savefig(os.path.join(outdir, "Persistence_density.png"))
 
 def get_dataset(input, patch_side, num_of_test):
     print('load data')
@@ -272,3 +311,36 @@ def plt_loss(epochs, train_loss_list, val_loss_list, outdir):
     plt.title('Loss')
     plt.grid()
     plt.savefig(outdir + "loss.png")
+
+def plt_grid(fig, grid_x, grid_y, out_path="./grid.png", a1=0, a2=1, n_data=7, patch_side=9):
+
+    # set graph
+    start_range = patch_side // 2
+    end_range = n_data * patch_side + start_range + 1
+    pixel_range = np.arange(start_range, end_range, patch_side)
+    sample_range_x = np.round(grid_x, 1)
+    sample_range_y = np.round(grid_y, 1)
+
+    plt.figure(figsize=(10, 10))
+    plt.xticks(pixel_range, sample_range_x)
+    plt.yticks(pixel_range, sample_range_y)
+    plt.xticks(color="None")
+    plt.yticks(color="None")
+    plt.tick_params(length=0)
+    plt.xlabel('z {}'.format(a1))
+    plt.ylabel('z {}'.format(a2))
+    plt.imshow(fig, cmap='Greys_r', vmin = 0, vmax = 1, interpolation='none')
+    plt.savefig(out_path)
+    plt.show()
+
+def morphing(model, l, out_path, patch_side=9):
+    patch_center = int(patch_side / 2)
+    morphing = model.decode(l).data.cpu().numpy()
+    morphing_img = morphing[0].reshape(patch_side, patch_side, patch_side)
+    morphing_axial = morphing_img[patch_center, :, :]
+    fig = plt.imshow(morphing_axial, cmap='Greys_r', vmin = 0, vmax = 1, interpolation='none')
+    plt.xticks(color="None")
+    plt.yticks(color="None")
+    plt.tick_params(length=0)
+    plt.savefig(out_path + 'linear_morphing/' + str(l)  + 'fig.png')
+
