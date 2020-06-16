@@ -1,5 +1,5 @@
 '''
-# Reconstruct image and evalute the performance by Generalization
+# Reconstruct image and evaluate the performance by Generalization
 # Author: Yuki Saeki
 '''
 
@@ -104,14 +104,8 @@ summary(model, (1, patch_side**3))
 def gen(model):
     file_ori = open(os.path.join(gen_ori_path, 'list.txt'), 'w')
     file_rec = open(os.path.join(gen_rec_path, 'list.txt'), 'w')
-    bar01 = []
-    bar0 = []
-    bar1 = []
-    bar2 = []
-    bar01_o = []
-    bar0_o = []
-    bar1_o = []
-    bar2_o = []
+    bar01, bar0, bar1, bar2 = [], [], [], []
+    bar01_o, bar0_o, bar1_o, bar2_o = [], [], [], []
     score = []
 
     model.eval()
@@ -158,8 +152,8 @@ def gen(model):
                 bar1.append(b1.item())
                 bar2.append(b2.item())
                 # calculate score
-                s = (1.0 - b01.item()**2) + b0.item()**2 + b1.item()**2 + b2.item()**2
-                score.append([s])
+                # s = (1.0 - b01.item()**2) + b0.item()**2 + b1.item()**2 + b2.item()**2
+                # score.append([s])
 
     file_ori.close()
     file_rec.close()
@@ -170,14 +164,13 @@ def gen(model):
     if args.PH == True:
         bar = np.transpose(bar)
         bar_o = np.transpose(bar_o)
-        score = np.array(score).flatten()
-        i_min = score.argmin()
-        i_max = score.argmax()
-        print(i_min)
-        save_PH_diag(test[i_min], os.path.join(gen_topo_path, 'min', 'ori{}'.format(str(i_min).zfill(4))))
-        save_PH_diag(rec_batch[i_min], os.path.join(gen_topo_path, 'min', 'rec{}'.format(str(i_min).zfill(4))))
-        save_PH_diag(test[i_max], os.path.join(gen_topo_path, 'max', 'ori{}'.format(str(i_max).zfill(4))))
-        save_PH_diag(rec_batch[i_max], os.path.join(gen_topo_path, 'max', 'rec{}'.format(str(i_max).zfill(4))))
+        # score = np.array(score).flatten()
+        # i_min = score.argmin()
+        # i_max = score.argmax()
+        # save_PH_diag(test[i_min], os.path.join(gen_topo_path, 'min', 'ori{}'.format(str(i_min).zfill(4))))
+        # save_PH_diag(rec_batch[i_min], os.path.join(gen_topo_path, 'min', 'rec{}'.format(str(i_min).zfill(4))))
+        # save_PH_diag(test[i_max], os.path.join(gen_topo_path, 'max', 'ori{}'.format(str(i_max).zfill(4))))
+        # save_PH_diag(rec_batch[i_max], os.path.join(gen_topo_path, 'max', 'rec{}'.format(str(i_max).zfill(4))))
 
     # plot reconstruction
     a_X = test[:, patch_center, :]
@@ -195,10 +188,7 @@ def gen(model):
 
 def spe(model):
     specificity = []
-    bar01 = []
-    bar0 = []
-    bar1 = []
-    bar2 = []
+    bar01, bar0, bar1, bar2 = [], [], [], []
     score = []
     sample = []
     id = []
@@ -251,7 +241,7 @@ def spe(model):
             # io.write_mhd_and_raw(ori_img, '{}.mhd'.format(os.path.join(spe_path, 'ori', '{}'.format(str(index).zfill(4)))))
             io.write_mhd_and_raw(sam_img, '{}.mhd'.format(os.path.join(spe_path, '{}'.format(str(j).zfill(4)))))
             file_spe.write('{}.mhd'.format(os.path.join(spe_path, '{}'.format(str(j).zfill(4)))) + '\n')
-            file_spe_ori.write('{}.mhd'.format(os.path.join(gen_path, '/ori/', '{}'.format(str(index).zfill(4)))) + '\n')
+            file_spe_ori.write('{}.mhd'.format(os.path.join(gen_ori_path, '{}'.format(str(index).zfill(4)))) + '\n')
 
             if args.PH == True:
                 # calculate PH
@@ -260,22 +250,22 @@ def spe(model):
                 bar0.append(b0.item())
                 bar1.append(b1.item())
                 bar2.append(b2.item())
-                s = (1.0 - b01.item()**2) + b0.item()**2 + b1.item()**2 + b2.item()**2
-                score.append([s])
+                # s = (1.0 - b01.item()**2) + b0.item()**2 + b1.item()**2 + b2.item()**2
+                # score.append([s])
     file_spe.close()
 
     bar = [bar01, bar0, bar1, bar2]
-    if args.PH == True:
-        bar = np.transpose(bar)
-        score = np.array(score).flatten()
-        id = np.array(id).flatten()
-        i_min = score.argmin()
-        i_max = score.argmax()
-
-        save_PH_diag(ori[id[i_min]], os.path.join(spe_topo_path, 'min', 'ori{}'.format(str(id[i_min][0]).zfill(4))))
-        save_PH_diag(sample[i_min], os.path.join(spe_topo_path, 'min', 'sam{}'.format(str(i_min).zfill(4))))
-        save_PH_diag(ori[id[i_max]], os.path.join(spe_topo_path, 'max', 'ori{}'.format(str(id[i_max][0]).zfill(4))))
-        save_PH_diag(sample[i_max], os.path.join(spe_topo_path, 'max', 'sam{}'.format(str(i_max).zfill(4))))
+    # if args.PH == True:
+    #     bar = np.transpose(bar)
+    #     score = np.array(score).flatten()
+    #     id = np.array(id).flatten()
+    #     i_min = score.argmin()
+    #     i_max = score.argmax()
+    #
+    #     save_PH_diag(ori[id[i_min]], os.path.join(spe_topo_path, 'min', 'ori{}'.format(str(id[i_min][0]).zfill(4))))
+    #     save_PH_diag(sample[i_min], os.path.join(spe_topo_path, 'min', 'sam{}'.format(str(i_min).zfill(4))))
+    #     save_PH_diag(ori[id[i_max]], os.path.join(spe_topo_path, 'max', 'ori{}'.format(str(id[i_max][0]).zfill(4))))
+    #     save_PH_diag(sample[i_max], os.path.join(spe_topo_path, 'max', 'sam{}'.format(str(i_max).zfill(4))))
 
     return specificity, bar
 

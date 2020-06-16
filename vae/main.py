@@ -9,7 +9,8 @@ from torch.nn import functional as F
 from torchvision import datasets, transforms
 from torchvision.utils import save_image
 from torchsummary import summary
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
+import tensorboardX as tbx
 from visdom import Visdom
 
 import cloudpickle
@@ -22,7 +23,7 @@ from topologylayer.nn import *
 # from topologylayer.functional.utils_dionysus import *
 
 parser = argparse.ArgumentParser(description='VAE')
-parser.add_argument('--input', type=str, default="tip/",
+parser.add_argument('--input', type=str, default="hole/",
                     help='File path of input images')
 parser.add_argument('--batch-size', type=int, default=128, metavar='N',
                     help='input batch size for training (default: 128)')
@@ -34,8 +35,9 @@ parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
 parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                     help='how many batches to wait before logging training status')
-parser.add_argument('--beta', type=float, default=1, metavar='B',
+parser.add_argument('--beta', type=float, default=0.1, metavar='B',
                     help='beta')
+parser.add_argument('--L1', '-l1', action='store_true', default=False, help='use L1 norm as rec')
 parser.add_argument('--lam', type=float, default=0, metavar='L',
                     help='lambda')
 parser.add_argument('--topo', '-t', action='store_true', default=False, help='topo')
@@ -44,7 +46,7 @@ parser.add_argument('--mode', type=int, default=0,
                     help='[mode: process] = [0: artificial], [1: real], [2: debug]')
 parser.add_argument('--model', type=str, default="",
                     help='File path of loaded model')
-parser.add_argument('--latent_dim', type=int, default=5,
+parser.add_argument('--latent_dim', type=int, default=6,
                     help='dimension of latent space')
 parser.add_argument('--do', type=int, default=0,
                     help='drop out rate')
@@ -63,33 +65,35 @@ viz = Visdom()
 patch_side = 9
 
 data_path = os.path.join("./input/", args.input, "filename.txt")
+width_number = len(str(args.lam))
 
 if args.mode==0:
     num_of_data = 10000
     num_of_test = 2000
     num_of_val = 2000
-    outdir = os.path.join("./results/artificial/", args.input, "z_{}/B_{}/L_{}/".format(args.latent_dim, args.beta, args.lam))
+    outdir = os.path.join("./results/artificial/", args.input, "z_{}/B_{}/L_{:g}/".format(args.latent_dim, args.beta, args.lam))
 elif args.constrain==True:
     num_of_data = 1978
     num_of_test = 467
     num_of_val = 425
-    outdir = "./results/CT/con/z_{}/B_{}/L_{}/".format(args.latent_dim, args.beta, args.lam)
+    outdir = "./results/CT/con/z_{}/B_{}/L_{:g}/".format(args.latent_dim, args.beta, args.lam)
 elif args.mode==1:
     num_of_data = 3039
     num_of_test = 607
     num_of_val = 607
-    outdir = "./results/CT/z_{}/B_{}/L_{}/".format(args.latent_dim, args.beta, args.lam)
+    outdir = "./results/CT/z_{}/B_{}/L_{:g}/".format(args.latent_dim, args.beta, args.lam)
 else:
     num_of_data = 10000
     num_of_test = 2000
     num_of_val = 2000
     outdir = "./results/debug/".format(args.latent_dim, args.beta, args.lam)
 
-
-writer = SummaryWriter(log_dir=outdir+"logs")
+num_of_train = num_of_data - num_of_val - num_of_test
 
 if not (os.path.exists(outdir)):
     os.makedirs(outdir)
+
+writer = tbx.SummaryWriter(log_dir=outdir+"logs")
 
 # save parameters
 with open(os.path.join(outdir, "params.json"), mode="w") as f:
@@ -103,7 +107,6 @@ for i in trange(len(list)):
     data_set[i, :] = np.reshape(io.read_mhd_and_raw(list[i]), [patch_side, patch_side, patch_side])
 
 data = data_set.reshape(num_of_data, patch_side **3)
-
 
 def min_max(x, axis=None):
     x_min = x.min(axis=axis, keepdims=True)
@@ -171,8 +174,9 @@ if args.model:
 else:
     model = VAE(args.latent_dim, args.do).to(device)
 
-optimizer = optim.Adam(model.parameters(), lr=1e-5)
+writer.add_graph(model, train_data[0].view(1, patch_side**3))
 
+optimizer = optim.Adam(model.parameters(), lr=1e-5)
 
 # Reconstruction + KL divergence losses summed over all elements and batch
 def loss_function(recon_x, x, mu, logvar):
@@ -181,8 +185,12 @@ def loss_function(recon_x, x, mu, logvar):
     assert batch_size != 0
 
     # BCE = F.binary_cross_entropy(recon_x, x.view(-1, patch_side**3), reduction='sum')
-    MSE = F.mse_loss(recon_x, x, size_average=False).div(batch_size)
-    SE = MSE*feature_size
+    if args.L1==True:
+        MAE = F.l1_loss(recon_x, x, size_average=False).div(batch_size)
+        REC = MAE*feature_size
+    else:
+        MSE = F.mse_loss(recon_x, x, size_average=False).div(batch_size)
+        REC = MSE*feature_size
     # see Appendix B from VAE paper:
     # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
     # https://arxiv.org/abs/1312.6114
@@ -193,19 +201,16 @@ def loss_function(recon_x, x, mu, logvar):
     if args.topo==True:
         topo, b01, b0, b1, b2 = topological_loss(recon_x, x)
         topo, b01, b0, b1, b2 = topo*args.lam, b01*args.lam, b0*args.lam, b1*args.lam, b2*args.lam
-        total_loss = SE + KLD + topo
-        return total_loss, SE, KLD, topo, b01, b0, b1, b2
+        total_loss = REC + KLD + topo
+        return total_loss, REC, KLD, topo, b01, b0, b1, b2
     else:
-        total_loss = SE + KLD
-        return total_loss, SE, KLD
+        total_loss = REC + KLD
+        return total_loss, REC, KLD
 
 
 def topological_loss(recon_x, x):
     batch_size = x.size(0)
-    b01 = 0
-    b0 = 0
-    b1 = 0
-    b2 = 0
+    b01, b0, b1, b2 = 0, 0, 0, 0
     cpx = init_tri_complex_3d(patch_side, patch_side, patch_side)
     layer = LevelSetLayer(cpx, maxdim=2, sublevel=False)
     f01 = TopKBarcodeLengths(dim=0, k=1)
@@ -229,13 +234,10 @@ def topological_loss(recon_x, x):
 def train(epoch):
     model.train()
     train_loss = 0
-    b01 = 0
-    b0 = 0
-    b1 = 0
-    b2 = 0
     SE = 0
     KLD = 0
     topo = 0
+    b01, b0, b1, b2 = 0, 0, 0, 0
     for batch_idx, data in enumerate(train_loader):
         data = data.to(device)
         optimizer.zero_grad()
@@ -272,22 +274,43 @@ def train(epoch):
                 100. * batch_idx / len(train_loader),
                 loss.item() / len(data)))
 
+    writer.add_images('images/train',
+                      recon_batch.view(args.batch_size, 1, patch_side, patch_side, patch_side)[:, :, 4, :], epoch)
+
     train_loss /= len(train_loader.dataset)
+    SE /= len(train_loader.dataset)
+    KLD /= len(train_loader.dataset)
 
     train_loss_list.append(train_loss)
     print('====> Epoch: {} Average loss: {:.4f}'.format(
           epoch, train_loss))
+
+    writer.add_scalars("loss/vae_loss", {'Train': train_loss,
+                                             'Rec': SE,
+                                             'KL': KLD}, epoch)
+
+    viz.line(X=np.array([epoch]), Y=np.array([train_loss]), win='each_loss', name='train', update='append',
+             opts=dict(showlegend=True))
+    viz.line(X=np.array([epoch]), Y=np.array([SE]), win='each_loss', name='Rec', update='append')
+    viz.line(X=np.array([epoch]), Y=np.array([KLD]), win='each_loss', name='KL', update='append')
+
     if args.topo==True:
         b01 /= len(train_loader.dataset)
         b0 /= len(train_loader.dataset)
         b1 /= len(train_loader.dataset)
         b2 /= len(train_loader.dataset)
         topo /= len(train_loader.dataset)
+
         writer.add_scalars("loss/topological_loss", {'topo': topo,
                                                      'b01': b01,
                                                      'b0': b0,
                                                      'b1': b1,
                                                      'b2': b2}, epoch)
+        writer.add_scalars("loss/each_loss", {'Train': train_loss,
+                                              'Rec': SE,
+                                              'KL': KLD,
+                                              'Topo': topo}, epoch)
+
         viz.line(X=np.array([epoch]), Y=np.array([topo]), win='topo_loss', name='topo', update='append',
                  opts=dict(showlegend=True))
         viz.line(X=np.array([epoch]), Y=np.array([b01]), win='topo_loss', name='b01', update='append')
@@ -295,21 +318,6 @@ def train(epoch):
         viz.line(X=np.array([epoch]), Y=np.array([b1]), win='topo_loss', name='b1', update='append')
         viz.line(X=np.array([epoch]), Y=np.array([b2]), win='topo_loss', name='b2', update='append')
         viz.line(X=np.array([epoch]), Y=np.array([topo]), win='each_loss', name='Topo', update='append')
-
-        writer.add_scalars("loss/each_loss", {'Train': train_loss,
-                                              'Rec': SE,
-                                              'KL': KLD,
-                                              'Topo': topo}, epoch)
-    if args.mode!=2:
-        SE /= len(train_loader.dataset)
-        KLD /= len(train_loader.dataset)
-        writer.add_scalars("loss/each_loss", {'Train': train_loss,
-                                                 'Rec': SE,
-                                                 'KL': KLD}, epoch)
-        viz.line(X=np.array([epoch]), Y=np.array([train_loss]), win='each_loss', name='train', update='append',
-                 opts=dict(showlegend=True))
-        viz.line(X=np.array([epoch]), Y=np.array([SE]), win='each_loss', name='Rec', update='append')
-        viz.line(X=np.array([epoch]), Y=np.array([KLD]), win='each_loss', name='KL', update='append')
 
     return train_loss
 
@@ -329,6 +337,7 @@ def val(epoch):
                 loss, l_SE, l_KLD = loss_function(recon_batch, val_data, mu, logvar)
             val_loss += loss.item()
 
+        writer.add_images('images/val', recon_batch.view(args.batch_size, 1, patch_side, patch_side, patch_side)[:,:,4,:], epoch)
             # val_loss += loss_function(recon_batch, data, mu, logvar).item()
 
     val_loss /= len(val_loader.dataset)
@@ -338,7 +347,7 @@ def val(epoch):
     return val_loss
 
 if __name__ == "__main__":
-    val_loss_min = 1000
+    val_loss_min = 10000
     epochs_no_improve = 0
     min_delta = 0.001
     n_epochs_stop = args.patient

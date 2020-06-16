@@ -3,13 +3,13 @@ import dataIO as io
 import argparse
 
 parser = argparse.ArgumentParser(description='VAE test')
-parser.add_argument('--input', type=str, default="E:/git/pytorch/vae/results/artificial/tip/z_3/B_0.1/L_0/gen/rec/list.txt",
+parser.add_argument('--input', type=str, default="E:/git/pytorch/vae/results/artificial/hole/z_6/B_0.5/L_0/gen/ori/list.txt",
                     help='File path of input images')
 parser.add_argument('--patch_side', type=int, default=9,
                     help='how long patch side for input')
-parser.add_argument('--num_of_data', type=int, default=1380,
+parser.add_argument('--num_of_data', type=int, default=215,
                     help='number of dataset')
-parser.add_argument('--output', type=str, default="E:/git/pytorch/vae/results/artificial/tip/z_3/B_0.1/L_0/gen/rec/",
+parser.add_argument('--output', type=str, default="E:/git/pytorch/vae/results/artificial/hole/z_6/B_0.5/L_0/gen/",
                     help='File path of output images')
 args = parser.parse_args()
 
@@ -18,7 +18,9 @@ data_set = get_dataset(args.input, args.patch_side, args.num_of_data)
 # data_set = min_max(data_set)
 # threshold
 # for th in np.linspace()
-data_set = data_set > 0.33
+# th = 0.5
+# data_set = (data_set > th) * 1
+# print(data_set)
 
 # display image
 display_slices(data_set[args.num_of_data-1:args.num_of_data,:])
@@ -27,7 +29,7 @@ display_slices(data_set[args.num_of_data-1:args.num_of_data,:])
 # compute_Betti_bumbers(data_set[args.num_of_data-1])
 
 # plot PH diagram
-# PH_diag(data_set[args.num_of_data-1], args.patch_side)
+PH_diag(data_set[args.num_of_data-1], args.patch_side)
 # save_PH_diag(data_set[args.num_of_data-1], args.output)
 
 # # persistent
