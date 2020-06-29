@@ -12,13 +12,14 @@ from torchsummary import summary
 # from torch.utils.tensorboard import SummaryWriter
 import tensorboardX as tbx
 from visdom import Visdom
+from solver import SquaredBarcodeLengths, PartialSquaredBarcodeLengths
 
 import cloudpickle
 import numpy as np
 import matplotlib.pyplot as plt
 import dataIO as io
 from tqdm import trange
-from utils import init_tri_complex_3d
+from utils import init_tri_complex_3d, plt_loss
 from topologylayer.nn import *
 # from topologylayer.functional.utils_dionysus import *
 
@@ -43,7 +44,7 @@ parser.add_argument('--lam', type=float, default=0, metavar='L',
 parser.add_argument('--topo', '-t', action='store_true', default=False, help='topo')
 parser.add_argument('--constrain', '-c', action='store_true', default=False, help='topo con')
 parser.add_argument('--mode', type=int, default=0,
-                    help='[mode: process] = [0: artificial], [1: real], [2: debug]')
+                    help='[mode: process] = [0: artificial], [1: real], [2: only topological loss]')
 parser.add_argument('--model', type=str, default="",
                     help='File path of loaded model')
 parser.add_argument('--latent_dim', type=int, default=6,
@@ -71,22 +72,26 @@ if args.mode==0:
     num_of_data = 10000
     num_of_test = 2000
     num_of_val = 2000
-    outdir = os.path.join("./results/artificial/", args.input, "z_{}/B_{}/L_{:g}/".format(args.latent_dim, args.beta, args.lam))
+    if args.L1==True:
+        outdir = os.path.join("./results/artificial/", args.input, "AE",
+                              "z_{}/B_{:g}/L_{:g}/".format(args.latent_dim, args.beta, args.lam))
+    else:
+        outdir = os.path.join("./results/artificial/", args.input, "z_{}/B_{:g}/L_{:g}/".format(args.latent_dim, args.beta, args.lam))
 elif args.constrain==True:
     num_of_data = 1978
     num_of_test = 467
     num_of_val = 425
-    outdir = "./results/CT/con/z_{}/B_{}/L_{:g}/".format(args.latent_dim, args.beta, args.lam)
+    outdir = "./results/CT/con/z_{}/B_{:g}/L_{:g}/".format(args.latent_dim, args.beta, args.lam)
 elif args.mode==1:
     num_of_data = 3039
     num_of_test = 607
     num_of_val = 607
-    outdir = "./results/CT/z_{}/B_{}/L_{:g}/".format(args.latent_dim, args.beta, args.lam)
+    outdir = "./results/CT/z_{}/B_{:g}/L_{:g}/".format(args.latent_dim, args.beta, args.lam)
 else:
     num_of_data = 10000
     num_of_test = 2000
     num_of_val = 2000
-    outdir = "./results/debug/".format(args.latent_dim, args.beta, args.lam)
+    outdir = os.path.join("./results/artificial/", args.input, "z_{}/topo/L_{:g}/".format(args.latent_dim, args.beta, args.lam))
 
 num_of_train = num_of_data - num_of_val - num_of_test
 
@@ -187,10 +192,10 @@ def loss_function(recon_x, x, mu, logvar):
     # BCE = F.binary_cross_entropy(recon_x, x.view(-1, patch_side**3), reduction='sum')
     if args.L1==True:
         MAE = F.l1_loss(recon_x, x, size_average=False).div(batch_size)
-        REC = MAE*feature_size
+        REC = MAE * feature_size
     else:
         MSE = F.mse_loss(recon_x, x, size_average=False).div(batch_size)
-        REC = MSE*feature_size
+        REC = MSE * feature_size
     # see Appendix B from VAE paper:
     # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
     # https://arxiv.org/abs/1312.6114
@@ -210,13 +215,13 @@ def loss_function(recon_x, x, mu, logvar):
 
 def topological_loss(recon_x, x):
     batch_size = x.size(0)
-    b01, b0, b1, b2 = 0, 0, 0, 0
+    b01, b0, b1, b2 = 0., 0., 0., 0.
     cpx = init_tri_complex_3d(patch_side, patch_side, patch_side)
     layer = LevelSetLayer(cpx, maxdim=2, sublevel=False)
     f01 = TopKBarcodeLengths(dim=0, k=1)
-    f0 = PartialSumBarcodeLengths(dim=0, skip=1)
-    f1 = SumBarcodeLengths(dim=1)
-    f2 = SumBarcodeLengths(dim=2)
+    f0 = PartialSquaredBarcodeLengths(dim=0, skip=1)
+    f1 = SquaredBarcodeLengths(dim=1)
+    f2 = SquaredBarcodeLengths(dim=2)
     for i in range(batch_size):
         dgminfo = layer(recon_x.view(batch_size, patch_side, patch_side, patch_side)[i])
         b01 += ((1 - f01(dgminfo) ** 2)).sum()
@@ -301,7 +306,7 @@ def train(epoch):
         b2 /= len(train_loader.dataset)
         topo /= len(train_loader.dataset)
 
-        writer.add_scalars("loss/topological_loss", {'topo': topo,
+        writer.add_scalars("loss/topological_loss", {'Topo': topo,
                                                      'b01': b01,
                                                      'b0': b0,
                                                      'b1': b1,
@@ -380,6 +385,7 @@ if __name__ == "__main__":
         # Check early stopping condition
         if epochs_no_improve >= n_epochs_stop:
             print('-'*20, 'Early stopping!', '-'*20)
+            plt_loss(epoch, train_loss_list, val_loss_list, outdir)
             break
-
+        plt_loss(epoch, train_loss_list, val_loss_list, outdir)
     writer.close()

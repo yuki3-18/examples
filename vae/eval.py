@@ -21,7 +21,7 @@ from topologylayer.nn.levelset import *
 from tqdm import trange
 
 parser = argparse.ArgumentParser(description='VAE test')
-parser.add_argument('--input', type=str, default='./input/tip/filename.txt',
+parser.add_argument('--input', type=str, default='./input/hole/filename.txt',
                     help='File path of input images')
 parser.add_argument('--outdir', type=str, default='./results/',
                     help='File path of output images')
@@ -53,7 +53,7 @@ else:
 
 # settings
 patch_side = 9
-patch_center = int(patch_side/2 - 0.5)
+patch_center = patch_side//2
 latent_dim = args.latent_dim
 n_sample = 2000
 
@@ -77,25 +77,31 @@ model_path = os.path.join(args.outdir, 'model.pkl')
 
 # get data
 data_set = get_dataset(args.input, patch_side, num_of_data)
+gs_data_set = get_dataset('./input/hole0/filename.txt', patch_side, num_of_data)
 data = data_set.reshape(num_of_data, patch_side * patch_side * patch_side)
+gs_data_set = gs_data_set.reshape(num_of_data, patch_side * patch_side * patch_side)
 data = min_max(data, axis=1)
+gs_data = min_max(gs_data_set, axis=1)
 test = data[:num_of_test]
+gs = gs_data[:num_of_test]
 
 # divide data
 test_data = torch.from_numpy(test).float()
+gs_data = torch.from_numpy(gs).float()
 train_data = torch.from_numpy(data[num_of_test+num_of_val:]).float()
-train_loader = torch.utils.data.DataLoader(train_data,
-                          batch_size=train_data.size(0),
-                          shuffle=False,
-                          num_workers=0,
-                          pin_memory=False,
-                          drop_last=False)
-test_loader = torch.utils.data.DataLoader(test_data,
-                          batch_size=test_data.size(0),
-                          shuffle=False,
-                          num_workers=0,
-                          pin_memory=False,
-                          drop_last=False)
+# train_loader = torch.utils.data.DataLoader(train_data,
+#                           batch_size=train_data.size(0),
+#                           shuffle=False,
+#                           num_workers=0,
+#                           pin_memory=False,
+#                           drop_last=False)
+# test_loader = torch.utils.data.DataLoader(test_data,
+#                           batch_size=test_data.size(0),
+#                           shuffle=False,
+#                           num_workers=0,
+#                           pin_memory=False,
+#                           drop_last=False)
+
 # load model
 with open(model_path, 'rb') as f:
     model = cloudpickle.load(f)
@@ -115,6 +121,7 @@ def gen(model):
         rec_batch = rec_batch.cpu().numpy()
         test = test_data.numpy()
         generalization = np.double(np.mean(abs(rec_batch - test), axis=1))
+        gen_gs = np.double(np.mean(abs(rec_batch - gs), axis=1))
 
         rec_batch = np.reshape(rec_batch,[num_of_test, patch_side, patch_side, patch_side])
         test = np.reshape(test, [num_of_test, patch_side, patch_side, patch_side])
@@ -182,6 +189,7 @@ def gen(model):
     visualize_slices(a_X, a_Xe, args.outdir + 'gen/axial_')
     visualize_slices(c_X, c_Xe, args.outdir + 'gen/coronal_')
     visualize_slices(s_X, s_Xe, args.outdir + 'gen/sagital_')
+    np.savetxt(os.path.join(args.outdir, 'gen_gs.csv'), gen_gs, delimiter=',')
 
     return generalization, bar, bar_o
 
@@ -192,6 +200,7 @@ def spe(model):
     score = []
     sample = []
     id = []
+    spe_gs = []
 
     model.eval()
     #  calculate mu and sigma
@@ -214,19 +223,29 @@ def spe(model):
             # sample_z = torch.normal(mu, sigma, (1, latent_dim)).to(device)
             sam_batch = model.decode(sample_z)
             sam_single = sam_batch.cpu().numpy()
-            sample.append(sam_single)
+            # sample.append(sam_single)
             sam = np.reshape(sam_single, [patch_side, patch_side, patch_side])
 
             # calculate spe
-            case_min_specificity = 1.0
-            for image_index in range(num_of_test):
-                specificity_tmp = L1norm(ori[image_index] ,sam)
-                if specificity_tmp < case_min_specificity:
-                    case_min_specificity = specificity_tmp
-                    index = image_index
+            # case_min_specificity = 1.0
 
-            specificity.append([case_min_specificity])
+            specificity_tmp = np.double(np.mean(abs(test - sam_single), axis=1))
+            spe_gs_tmp = np.double(np.mean(abs(gs - sam_single), axis=1))
+            index = np.argmin(specificity_tmp)
+            # index_gs = np.argmax(spe_gs_tmp)
+            case_min_specificity = specificity_tmp[index]
+            cm_spe_gs = spe_gs_tmp[index]
+
+            # for image_index in range(num_of_test):
+            #     specificity_tmp = L1norm(ori[image_index] ,sam)
+            #     # spe_gs_tmp = L1norm(gs[image_index], sam)
+            #     if specificity_tmp < case_min_specificity:
+            #         case_min_specificity = specificity_tmp
+            #         index = image_index
+
             id.append([index])
+            specificity.append([case_min_specificity])
+            spe_gs.append([cm_spe_gs])
 
             # EUDT
             # ori_img = sitk.GetImageFromArray(ori[index])
@@ -255,8 +274,8 @@ def spe(model):
     file_spe.close()
 
     bar = [bar01, bar0, bar1, bar2]
-    # if args.PH == True:
-    #     bar = np.transpose(bar)
+    if args.PH == True:
+        bar = np.transpose(bar)
     #     score = np.array(score).flatten()
     #     id = np.array(id).flatten()
     #     i_min = score.argmin()
@@ -266,6 +285,8 @@ def spe(model):
     #     save_PH_diag(sample[i_min], os.path.join(spe_topo_path, 'min', 'sam{}'.format(str(i_min).zfill(4))))
     #     save_PH_diag(ori[id[i_max]], os.path.join(spe_topo_path, 'max', 'ori{}'.format(str(id[i_max][0]).zfill(4))))
     #     save_PH_diag(sample[i_max], os.path.join(spe_topo_path, 'max', 'sam{}'.format(str(i_max).zfill(4))))
+
+    np.savetxt(os.path.join(args.outdir, 'spe_gs.csv'), spe_gs, delimiter=',')
 
     return specificity, bar
 

@@ -5,6 +5,6 @@ set py=E:/git/pytorch/vae/main.py
 
 set indir=hole/
 
-call %anaconda% %py% --input %indir% --latent_dim 3 --lam 0 --beta 1 --batch-size 128
+call %anaconda% %py% --input %indir% --latent_dim 6 --lam 10000 --beta 0.1 --topo --epochs 500
 
 pause

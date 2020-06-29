@@ -24,20 +24,21 @@ from utils import *
 from tqdm import trange
 import pickle
 from importlib import machinery
+from main import VAE
 
 parser = argparse.ArgumentParser(description='VAE test')
-parser.add_argument('--input', type=str, default="E:/git/TFRecord_example/input/CT/patch/size9/cc1/filename.txt",
+parser.add_argument('--input', type=str, default="E:/git/pytorch/vae/input/hole/filename.txt",
                     help='File path of input images')
-parser.add_argument('--model', type=str, default="E:/git/pytorch/vae/results/z_24/B_0.1/L_0.005/model.pkl",
+parser.add_argument('--model', type=str, default="E:/git/pytorch/vae/results/artificial/hole/z_6/B_0.1/L_30000/weight/246epoch-42.21.pth",
                     help='File path of model')
 parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='enables CUDA')
 parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
 parser.add_argument('--constrain', '-c', type=bool, default=False, help='topo con')
-parser.add_argument('--outdir', type=str, default="E:/git/pytorch/vae/results/z_24/B_0.1/L_0.005/gen/",
+parser.add_argument('--outdir', type=str, default="E:/git/pytorch/vae/results/artificial/hole/z_6/B_0.1/L_30000/gen/",
                     help='File path of output images')
-parser.add_argument('--mode', type=int, default=1,
+parser.add_argument('--mode', type=int, default=0,
                     help='[mode: process] = [0: artificial], [1: real]')
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -84,12 +85,10 @@ test_loader = torch.utils.data.DataLoader(test_data,
                           pin_memory=False,
                           drop_last=False)
 
-
-with open(args.model, 'rb') as f:
-    model = cloudpickle.load(f)
+# with open(args.model, 'rb') as f:
+#     model = cloudpickle.load(f)
 
 def gen(model):
-    model.eval()
     with torch.no_grad():
         ori=[]
         rec=[]
@@ -146,3 +145,9 @@ def gen(model):
     visualize_slices(a_X, a_Xe, args.outdir + "axial_")
     visualize_slices(c_X, c_Xe, args.outdir + "coronal_")
     visualize_slices(s_X, s_Xe, args.outdir + "sagital_")
+
+if __name__ == '__main__':
+    model = VAE(latent_dim=6).to(device)
+    model.eval()
+    model.load_state_dict(torch.load(args.model))
+    gen(model)

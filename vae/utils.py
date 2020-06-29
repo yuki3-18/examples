@@ -252,7 +252,7 @@ def PH_diag(img, patch_side):
     diag = cc.persistence()
     plt.figure(figsize=(3, 3))
     diag_clean = diag_tidy(diag, 1e-3)
-    gd.plot_persistence_barcode(diag_clean, max_intervals=0,inf_delta=10)
+    gd.plot_persistence_barcode(diag_clean, max_intervals=0,inf_delta=100)
     print(diag_clean)
     plt.xlim(0, 1)
     plt.ylim(-1, len(diag_clean))
@@ -270,26 +270,26 @@ def save_PH_diag(img, outdir):
     cc = gd.CubicalComplex(dimensions=(z, y, x),
                            top_dimensional_cells=1 - img.flatten())
     diag = cc.persistence()
-    diag_clean = diag_tidy(diag, 1e-3)
+    # diag_clean = diag_tidy(diag, 1e-3)
     # print(diag_clean)
     # np.savetxt(os.path.join(outdir, 'PH.csv'), diag_clean, delimiter=",")
     # with open(os.path.join(outdir, 'generalization.txt'), 'wt') as f:
     #     for ele in diag_clean:
     #         f.write(ele + '\n')
     fig1 = plt.figure(figsize=(3, 3))
-    gd.plot_persistence_barcode(diag_clean, max_intervals=0,inf_delta=10)
+    gd.plot_persistence_barcode(diag, max_intervals=0,inf_delta=100)
     plt.xlim(0, 1)
-    plt.ylim(-1, len(diag_clean))
+    plt.ylim(-1, len(diag))
     plt.xticks(ticks=np.linspace(0, 1, 6), labels=np.round(np.linspace(1, 0, 6), 2))
     plt.yticks([])
     plt.savefig(os.path.join(outdir, "Persistence_barcode.png"))
 
     fig2 = plt.figure()
-    gd.plot_persistence_diagram(diag_clean, legend=True)
+    gd.plot_persistence_diagram(diag, legend=True)
     plt.savefig(os.path.join(outdir, "Persistence_diagram.png"))
 
     fig3 = plt.figure()
-    gd.plot_persistence_density(diag_clean, legend=True)
+    gd.plot_persistence_density(diag, legend=True)
     plt.savefig(os.path.join(outdir, "Persistence_density.png"))
 
 def get_dataset(input, patch_side, num_of_test):
@@ -306,11 +306,26 @@ def plt_loss(epochs, train_loss_list, val_loss_list, outdir):
     plt.plot(range(epochs), train_loss_list, color='blue', linestyle='-', label='train_loss')
     plt.plot(range(epochs), val_loss_list, color='green', linestyle='--', label='val_loss')
     plt.legend()
-    plt.xlabel('epoch')
+    plt.xlabel('epochs')
     plt.ylabel('loss')
     plt.title('Loss')
     plt.grid()
     plt.savefig(outdir + "loss.png")
+
+def plt_latent(latent_space, axis_n, std, out_path='latent_space.png', label=np.zeros(0)):
+    # plt latent space
+    a1, a2 = axis_n
+    plt.figure(figsize=(10, 10))
+    plt.axis([-3.5 * std[a1], 3.5 * std[a1], -3.5 * std[a2], 3.5 * std[a2]])  # グラフ範囲の手動設定 [xmin, xmax, ymin, ymax]
+    if label.size==0:
+        plt.scatter(latent_space[:, a1], latent_space[:, a2])
+    else:
+        plt.scatter(latent_space[:, a1], latent_space[:, a2], c=label)
+        plt.colorbar()
+    plt.xlabel('z {}'.format(a1))
+    plt.ylabel('z {}'.format(a2))
+    plt.title('Latent space')
+    plt.savefig(out_path)
 
 def plt_grid(fig, grid_x, grid_y, out_path="./grid.png", a1=0, a2=1, n_data=7, patch_side=9):
 
@@ -324,9 +339,9 @@ def plt_grid(fig, grid_x, grid_y, out_path="./grid.png", a1=0, a2=1, n_data=7, p
     plt.figure(figsize=(10, 10))
     plt.xticks(pixel_range, sample_range_x)
     plt.yticks(pixel_range, sample_range_y)
-    plt.xticks(color="None")
-    plt.yticks(color="None")
-    plt.tick_params(length=0)
+    # plt.xticks(color="None")
+    # plt.yticks(color="None")
+    # plt.tick_params(length=0)
     plt.xlabel('z {}'.format(a1))
     plt.ylabel('z {}'.format(a2))
     plt.imshow(fig, cmap='Greys_r', vmin = 0, vmax = 1, interpolation='none')

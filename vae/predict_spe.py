@@ -24,6 +24,7 @@ from utils import *
 from tqdm import trange
 import pickle
 from importlib import machinery
+from main import VAE
 
 parser = argparse.ArgumentParser(description='VAE test')
 parser.add_argument('--input', type=str, default="E:/git/pytorch/vae/input/tip/filename.txt",
@@ -43,7 +44,7 @@ args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
 
 patch_side = 9
-latent_dim = 3
+latent_dim = 6
 
 if args.mode==0:
     num_of_data = 10000
@@ -99,7 +100,7 @@ num_of_gen = 2000
 patch_side = 9
 
 
-def spe_test(model):
+def spe(model):
     #  calculate mu and sigma
     for i in enumerate(train_loader):
         with torch.no_grad():
@@ -139,9 +140,11 @@ def spe_test(model):
             # output image
             io.write_mhd_and_raw(eudt_image, '{}.mhd'.format(os.path.join(args.outdir, 'spe', '{}'.format(str(j).zfill(4)))))
 
-    return specificity
+    print('specificity = %f' % np.mean(specificity))
+    np.savetxt(os.path.join(args.outdir, 'specificity.csv'), specificity, delimiter=",")
 
-specificity = spe_test(model)
-
-print('specificity = %f' % np.mean(specificity))
-np.savetxt(os.path.join(args.outdir, 'specificity.csv'), specificity, delimiter=",")
+if __name__ == '__main__':
+    model = VAE(latent_dim=latent_dim).to(device)
+    model.eval()
+    model.load_state_dict(torch.load(args.model))
+    spe(model)
