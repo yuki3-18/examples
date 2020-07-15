@@ -10,6 +10,7 @@ from torchsummary import summary
 import torch.utils.data
 import cloudpickle
 from tqdm import trange, tqdm
+from solver import VAE
 import numpy as np
 import gudhi as gd
 import SimpleITK as sitk
@@ -21,12 +22,12 @@ from topologylayer.nn.levelset import *
 from tqdm import trange
 
 parser = argparse.ArgumentParser(description='VAE test')
-parser.add_argument('--input', type=str, default='./input/hole/filename.txt',
+parser.add_argument('--input', type=str, default='hole',
                     help='File path of input images')
-parser.add_argument('--outdir', type=str, default='./results/',
+parser.add_argument('--model', type=str, default='',
+                    help='Model path')
+parser.add_argument('--outdir', type=str, default='E:/git/pytorch/vae/results/artificial/hole/z_3/B_0.1/L_60000/',
                     help='File path of output images')
-parser.add_argument('--latent_dim', type=int, default=3,
-                    help='dimension of latent space')
 parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='enables CUDA')
 parser.add_argument('--seed', type=int, default=1, metavar='S',
@@ -54,7 +55,6 @@ else:
 # settings
 patch_side = 9
 patch_center = patch_side//2
-latent_dim = args.latent_dim
 n_sample = 2000
 
 torch.manual_seed(args.seed)
@@ -62,6 +62,7 @@ torch.manual_seed(args.seed)
 device = torch.device('cuda' if args.cuda else 'cpu')
 
 # set path
+in_path = os.path.join('./input', args.input, 'filename.txt')
 gen_path = os.path.join(args.outdir, 'gen')
 gen_ori_path = os.path.join(gen_path, 'ori')
 gen_rec_path = os.path.join(gen_path, 'rec')
@@ -76,13 +77,14 @@ os.makedirs(spe_ori_path, exist_ok=True)
 model_path = os.path.join(args.outdir, 'model.pkl')
 
 # get data
-data_set = get_dataset(args.input, patch_side, num_of_data)
-gs_data_set = get_dataset('./input/hole0/filename.txt', patch_side, num_of_data)
+data_set = get_dataset(in_path, patch_side, num_of_data)
 data = data_set.reshape(num_of_data, patch_side * patch_side * patch_side)
-gs_data_set = gs_data_set.reshape(num_of_data, patch_side * patch_side * patch_side)
 data = min_max(data, axis=1)
-gs_data = min_max(gs_data_set, axis=1)
 test = data[:num_of_test]
+
+gs_data_set = get_dataset('./input/{}0/filename.txt'.format(args.input), patch_side, num_of_data)
+gs_data_set = gs_data_set.reshape(num_of_data, patch_side * patch_side * patch_side)
+gs_data = min_max(gs_data_set, axis=1)
 gs = gs_data[:num_of_test]
 
 # divide data
@@ -103,8 +105,12 @@ train_data = torch.from_numpy(data[num_of_test+num_of_val:]).float()
 #                           drop_last=False)
 
 # load model
-with open(model_path, 'rb') as f:
-    model = cloudpickle.load(f)
+if args.model:
+    model = VAE(latent_dim=6).to(device)
+    model.load_state_dict(torch.load(args.model))
+else:
+    with open(model_path, 'rb') as f:
+        model = cloudpickle.load(f)
 summary(model, (1, patch_side**3))
 
 def gen(model):
@@ -165,6 +171,21 @@ def gen(model):
     file_ori.close()
     file_rec.close()
 
+    dif = generalization - gen_gs
+
+    i_min = dif.argmin()
+    i_max = dif.argmax()
+
+    # save images
+    save_img_planes(test[i_min], os.path.join(gen_path, 'min', 'ori_{:.4f}'.format(generalization[i_min])))
+    save_img_planes(gs[i_min], os.path.join(gen_path, 'min', 'gs_{:.4f}'.format(gen_gs[i_min])))
+    save_img_planes(rec_batch[i_min], os.path.join(gen_path, 'min', 'rec_{}'.format(str(i_min).zfill(4))))
+
+    save_img_planes(test[i_max], os.path.join(gen_path, 'max', 'ori_{:.4f}'.format(generalization[i_max])))
+    save_img_planes(gs[i_max], os.path.join(gen_path, 'max', 'gs_{:.4f}'.format(gen_gs[i_max])))
+    save_img_planes(rec_batch[i_max], os.path.join(gen_path, 'max', 'rec_{}'.format(str(i_max).zfill(4))))
+
+
     # transpose bar
     bar = [bar01, bar0, bar1, bar2]
     bar_o = [bar01_o, bar0_o, bar1_o, bar2_o]
@@ -172,8 +193,6 @@ def gen(model):
         bar = np.transpose(bar)
         bar_o = np.transpose(bar_o)
         # score = np.array(score).flatten()
-        # i_min = score.argmin()
-        # i_max = score.argmax()
         # save_PH_diag(test[i_min], os.path.join(gen_topo_path, 'min', 'ori{}'.format(str(i_min).zfill(4))))
         # save_PH_diag(rec_batch[i_min], os.path.join(gen_topo_path, 'min', 'rec{}'.format(str(i_min).zfill(4))))
         # save_PH_diag(test[i_max], os.path.join(gen_topo_path, 'max', 'ori{}'.format(str(i_max).zfill(4))))
@@ -189,7 +208,7 @@ def gen(model):
     visualize_slices(a_X, a_Xe, args.outdir + 'gen/axial_')
     visualize_slices(c_X, c_Xe, args.outdir + 'gen/coronal_')
     visualize_slices(s_X, s_Xe, args.outdir + 'gen/sagital_')
-    np.savetxt(os.path.join(args.outdir, 'gen_gs.csv'), gen_gs, delimiter=',')
+    np.savetxt(os.path.join(args.outdir, 'gen_gs_{:.4f}.csv'.format(np.mean(gen_gs))), gen_gs, delimiter=',')
 
     return generalization, bar, bar_o
 
@@ -209,8 +228,12 @@ def spe(model):
         recon_batch, mean, logvar = model(train_data_cuda)
         # mu = mean.mean().item()
         # sigma = (torch.exp(0.5 * logvar)).mean().item()
-        mean = torch.mean(mean, 0)
-        std = torch.mean(torch.exp(0.5 * logvar), 0)
+        mu = torch.mean(mean, 0)
+        # std = torch.mean(torch.exp(0.5 * logvar), 0)
+        sigma = torch.std(mean, 0)
+
+        print(mu)
+        print(sigma)
 
         file_spe = open(os.path.join(spe_path, 'list.txt'), 'w')
         file_spe_ori = open(os.path.join(spe_ori_path, 'list.txt'), 'w')
@@ -218,8 +241,8 @@ def spe(model):
         ori = np.reshape(test, [num_of_test, patch_side, patch_side, patch_side])
 
         for j in trange(n_sample):
-            eps = torch.randn_like(std)
-            sample_z = mean + std * eps
+            eps = torch.randn_like(sigma)
+            sample_z = mu + sigma * eps
             # sample_z = torch.normal(mu, sigma, (1, latent_dim)).to(device)
             sam_batch = model.decode(sample_z)
             sam_single = sam_batch.cpu().numpy()
@@ -286,7 +309,7 @@ def spe(model):
     #     save_PH_diag(ori[id[i_max]], os.path.join(spe_topo_path, 'max', 'ori{}'.format(str(id[i_max][0]).zfill(4))))
     #     save_PH_diag(sample[i_max], os.path.join(spe_topo_path, 'max', 'sam{}'.format(str(i_max).zfill(4))))
 
-    np.savetxt(os.path.join(args.outdir, 'spe_gs.csv'), spe_gs, delimiter=',')
+    np.savetxt(os.path.join(args.outdir, 'spe_gs_{:.4f}.csv'.format(np.mean(spe_gs))), spe_gs, delimiter=',')
 
     return specificity, bar
 
@@ -311,8 +334,9 @@ if __name__ == '__main__':
     # generalization
     print('-' * 20, 'Computing Generalization', '-' * 20)
     generalization, bar, bar_o = gen(model)
-    print('generalization = %f' % np.mean(generalization))
-    np.savetxt(os.path.join(args.outdir, 'generalization.csv'), generalization, delimiter=',')
+    gen_mean = np.mean(generalization)
+    print('generalization = %f' % gen_mean)
+    np.savetxt(os.path.join(args.outdir, 'generalization_{:.4f}.csv'.format(gen_mean)), generalization, delimiter=',')
     if args.PH == True:
         np.savetxt(os.path.join(args.outdir, 'gen_topo.csv'), bar, delimiter=',')
         # np.savetxt(os.path.join(args.outdir, 'ori_topo.csv'), bar_o, delimiter=',')
@@ -320,8 +344,9 @@ if __name__ == '__main__':
     # specificity
     print('-' * 20, 'Computing Specificity', '-' * 20)
     specificity, bar = spe(model)
-    print('specificity = %f' % np.mean(specificity))
-    np.savetxt(os.path.join(args.outdir, 'specificity.csv'), specificity, delimiter=',')
+    spe_mean = np.mean(specificity)
+    print('specificity = %f' % np.mean(spe_mean))
+    np.savetxt(os.path.join(args.outdir, 'specificity_{:.4f}.csv'.format(spe_mean)), specificity, delimiter=',')
     if args.PH == True:
         np.savetxt(os.path.join(args.outdir, 'spe_topo.csv'), bar, delimiter=',')
 

@@ -145,6 +145,38 @@ def display_slices(case):
                 axes[j, i].get_yaxis().set_visible(False)
         plt.show()
 
+def save_img_planes(img, path):
+    # img: image data (size, size, size)
+    os.makedirs(path, exist_ok=True)
+    min = 0
+    max = 1
+    img = np.reshape(img, [9, 9, 9])
+    z, y, x = img.shape
+    # sagital
+    fig, axes = plt.subplots(ncols=x, nrows=1, figsize=(x - 3, 1), dpi=150)
+    for i in range(x):
+        axes[i].imshow(img[:, :, i].reshape(y, z), cmap=cm.Greys_r, vmin=min, vmax=max, interpolation='none')
+        axes[i].set_title('x = %d' % i)
+        axes[i].get_xaxis().set_visible(False)
+        axes[i].get_yaxis().set_visible(False)
+    plt.savefig(path + '/sagital.png')
+    # coronal
+    fig, axes = plt.subplots(ncols=y, nrows=1, figsize=(y - 3, 1), dpi=150)
+    for i in range(y):
+        axes[i].imshow(img[:, i, :].reshape(z, x), cmap=cm.Greys_r, vmin=min, vmax=max, interpolation='none')
+        axes[i].set_title('y = %d' % i)
+        axes[i].get_xaxis().set_visible(False)
+        axes[i].get_yaxis().set_visible(False)
+    plt.savefig(path + '/coronal.png')
+    # axial
+    fig, axes = plt.subplots(ncols=z, nrows=1, figsize=(z - 3, 1), dpi=150)
+    for i in range(z):
+        axes[i].imshow(img[i, :, :].reshape(x, y), cmap=cm.Greys_r, vmin=min, vmax=max, interpolation='none')
+        axes[i].set_title('z = %d' % i)
+        axes[i].get_xaxis().set_visible(False)
+        axes[i].get_yaxis().set_visible(False)
+    plt.savefig(path + '/axial.png')
+
 def display_center_slices(case, size, num_data, outdir):
     # case: image data, num_data: number of data, size: length of a side
     min = np.min(case)
