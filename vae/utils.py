@@ -1,13 +1,13 @@
-import numpy as np
 import os
+import dataIO as io
+import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
-import gudhi as gd
-import dataIO as io
+from mpl_toolkits.mplot3d import axes3d
 import torch
 import torch.nn as nn
-from topologylayer.nn.features import pad_k
-from mpl_toolkits.mplot3d import axes3d
+import gudhi as gd
+from topologylayer.nn.features import get_start_end
 from topologylayer.nn import (PartialSumBarcodeLengths,
                               SumBarcodeLengths, TopKBarcodeLengths)
 from topologylayer.nn.levelset import LevelSetLayer
@@ -15,6 +15,7 @@ from topologylayer.functional.persistence import SimplicialComplex
 from topologylayer.util.construction import unique_simplices
 from scipy.spatial import Delaunay
 from tqdm import trange
+
 
 # calculate jaccard
 def jaccard(im1, im2):
@@ -44,7 +45,7 @@ def L2norm(im1, im2):
     if im1.shape != im2.shape:
         raise ValueError("Shape mismatch: im1 and im2 must have the same shape.")
 
-    return np.double(np.mean((im1 - im2)^2))
+    return np.double(np.mean((im1 - im2)**2))
 
 def matplotlib_plt(X, filename):
     fig = plt.figure()
@@ -255,19 +256,67 @@ def diag_tidy(diag, eps=1e-1):
 
 def calc_PH(data):
     z, y, x = data.shape
+    size = x * y * z
     # data = np.ndarray(data, [z, y, x])
     cpx = init_tri_complex_3d(z, y, x)
     layer = LevelSetLayer(cpx, maxdim=2, sublevel=False)
     dgminfo = layer(torch.from_numpy(data).float())
-    f01 = TopKBarcodeLengths(dim=0, k=1)
-    f0 = PartialSumBarcodeLengths(dim=0, skip=1)
-    f1 = SumBarcodeLengths(dim=1)
-    f2 = SumBarcodeLengths(dim=2)
-    b01 = f01(dgminfo).sum()
-    b0 = f0(dgminfo)
-    b1 = f1(dgminfo)
-    b2 = f2(dgminfo)
-    return b01, b0, b1, b2
+    # f01 = TopKBarcodeLengths(dim=0, k=1)
+    f0 = TopKBarcodeLengths(dim=0, k=size)
+    f1 = TopKBarcodeLengths(dim=1, k=size)
+    f2 = TopKBarcodeLengths(dim=2, k=size)
+    b01 = f0(dgminfo)[0]
+    b0 = f0(dgminfo)[1:].sum()
+    b1 = f1(dgminfo).sum()
+    b2 = f2(dgminfo).sum()
+    l01 = 1. - f0(dgminfo)[0]**2
+    l0 = (f0(dgminfo)[1:]**2).sum()
+    l1 = (f1(dgminfo)**2).sum()
+    l2 = (f2(dgminfo)**2).sum()
+
+    return b01, b0, b1, b2, l01, l0, l1, l2
+
+
+def getPB(dgminfo, dim):
+    dgms, issublevel = dgminfo
+    start, end = get_start_end(dgms[dim], issublevel)
+    lengths = end - start
+    death = start[lengths != 0]
+    birth = end[lengths != 0]
+    bar = torch.stack([1 - birth, 1 - death], dim=1).tolist()
+    if len(bar) != 0:
+        diag = []
+        for i in range(len(bar)):
+            diag.append([dim, bar[i]])
+        return diag
+    else:
+        return None
+
+
+def drawPB(data):
+    z, y, x = data.shape
+    cpx = init_tri_complex_3d(z, y, x)
+    layer = LevelSetLayer(cpx, maxdim=2, sublevel=False)
+    dgminfo = layer(torch.from_numpy(data).float())
+    diag = []
+    diag2 = getPB(dgminfo, 2)
+    diag1 = getPB(dgminfo, 1)
+    diag0 = getPB(dgminfo, 0)
+    if diag2 != None: diag += diag2
+    if diag1 != None: diag += diag1
+    if diag0 != None: diag += diag0
+
+    diag = diag_tidy(diag, 1e-3)
+    print(diag)
+
+    plt.figure(figsize=(3, 3))
+    gd.plot_persistence_barcode(diag, max_intervals=0,inf_delta=100)
+    plt.xlim(0, 1)
+    plt.ylim(-1, len(diag))
+    plt.xticks(ticks=np.linspace(0, 1, 6), labels=np.round(np.linspace(1, 0, 6), 2))
+    plt.yticks([])
+    plt.show()
+
 
 def compute_Betti_bumbers(img, th=0.5):
     print(img.shape)
@@ -291,10 +340,10 @@ def PH_diag(img, patch_side):
     plt.xticks(ticks=np.linspace(0, 1, 6), labels=np.round(np.linspace(1, 0, 6), 2))
     plt.yticks([])
     plt.show()
-    gd.plot_persistence_diagram(diag_clean, legend=True)
-    plt.show()
-    gd.plot_persistence_density(diag_clean, legend=True)
-    plt.show()
+    # gd.plot_persistence_diagram(diag_clean, legend=True)
+    # plt.show()
+    # gd.plot_persistence_density(diag_clean, legend=True)
+    # plt.show()
 
 def save_PH_diag(img, outdir):
     z, y, x = img.shape

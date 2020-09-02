@@ -26,7 +26,7 @@ from topologylayer.nn import *
 parser = argparse.ArgumentParser(description='VAE')
 parser.add_argument('--input', type=str, default="hole/",
                     help='File path of input images')
-parser.add_argument('--batch-size', type=int, default=32, metavar='N',
+parser.add_argument('--batch_size', type=int, default=32, metavar='N',
                     help='input batch size for training (default: 128)')
 parser.add_argument('--epochs', type=int, default=5000, metavar='N',
                     help='number of epochs to train (default: 10)')
@@ -39,9 +39,14 @@ parser.add_argument('--log-interval', type=int, default=10, metavar='N',
 parser.add_argument('--beta', type=float, default=0.1, metavar='B',
                     help='beta')
 parser.add_argument('--L1', '-l1', action='store_true', default=False, help='use L1 norm as rec loss')
-parser.add_argument('--lam', type=float, default=0, metavar='L',
+parser.add_argument('--lam', type=float, default=1, metavar='L',
                     help='lambda')
+parser.add_argument('--alpha', '-alp', type=float, default=1, metavar='A',
+                    help='gamma')
+parser.add_argument('--gamma', '-gam', type=float, default=1, metavar='C',
+                    help='gamma')
 parser.add_argument('--topo', '-t', action='store_true', default=False, help='topo')
+parser.add_argument('--bkg', '-b', action='store_true', default=False, help='calculate bkg PH')
 parser.add_argument('--constrain', '-c', action='store_true', default=False, help='topo con')
 parser.add_argument('--mode', type=int, default=0,
                     help='[mode: process] = [0: artificial], [1: real], [2: only topological loss]')
@@ -74,9 +79,9 @@ if args.mode==0:
     num_of_val = 2000
     if args.L1==True:
         outdir = os.path.join("./results/artificial/", args.input, "l1",
-                              "z_{}/B_{:g}/L_{:g}/".format(args.latent_dim, args.beta, args.lam))
+                              "z_{}/B_{:g}/batch{}/L_{:g}/C_{:g}/".format(args.latent_dim, args.beta, args.batch_size, args.lam, args.gamma))
     else:
-        outdir = os.path.join("./results/artificial/", args.input, "z_{}/B_{:g}/L_{:g}/".format(args.latent_dim, args.beta, args.lam))
+        outdir = os.path.join("./results/artificial/", args.input, "z_{}/B_{:g}/batch{}/L_{:g}/C_{:g}/A_{:g}/".format(args.latent_dim, args.beta, args.batch_size, args.lam, args.gamma, args.alpha))
 elif args.constrain==True:
     num_of_data = 1978
     num_of_test = 467
@@ -209,10 +214,16 @@ def loss_function(recon_x, x, mu, logvar):
     KLD *= args.beta
 
     if args.topo==True:
-        topo, b01, b0, b1, b2, bb01, bb0 = topological_loss(recon_x, x)
-        topo, b01, b0, b1, b2, bb01, bb0 = topo*args.lam, b01*args.lam, b0*args.lam, b1*args.lam, b2*args.lam, bb01*args.lam, bb0*args.lam
-        total_loss = REC + KLD + topo
-        return total_loss, REC, KLD, topo, b01, b0, b1, b2, bb01, bb0
+        if args.bkg == True:
+            topo, b01, b0, b1, b2, bb01, bb0, bb11, bb1, bb2 = topological_loss(recon_x, x)
+            topo, b01, b0, b1, b2, bb01, bb0, bb11, bb1, bb2 = topo*args.lam, b01*args.lam, b0*args.lam, b1*args.lam, b2*args.lam, bb01*args.lam, bb0*args.lam, bb11*args.lam, bb1*args.lam, bb2*args.lam
+            total_loss = REC + KLD + topo
+            return total_loss, REC, KLD, topo, b01, b0, b1, b2, bb01, bb0, bb11, bb1, bb2
+        else:
+            topo, b01, b0, b1, b2 = topological_loss(recon_x, x)
+            topo, b01, b0, b1, b2 = topo*args.lam, b01*args.lam, b0*args.lam, b1*args.lam, b2*args.lam
+            total_loss = REC + KLD + topo
+            return total_loss, REC, KLD, topo, b01, b0, b1, b2
     else:
         total_loss = REC + KLD
         return total_loss, REC, KLD
@@ -220,35 +231,56 @@ def loss_function(recon_x, x, mu, logvar):
 
 def topological_loss(recon_x, x):
     batch_size = x.size(0)
+    feature_size = x.size(1)
     b01, b0, b1, b2 = 0., 0., 0., 0.
-    bb0, bb01 = 0., 0.
+    bb01, bb0, bb11, bb1, bb2 = 0., 0., 0., 0., 0.
     cpx = init_tri_complex_3d(patch_side, patch_side, patch_side)
     layer = LevelSetLayer(cpx, maxdim=2, sublevel=False)
     f01 = TopKBarcodeLengths(dim=0, k=1)
     f0 = PartialSquaredBarcodeLengths(dim=0, skip=1)
     f1 = SquaredBarcodeLengths(dim=1)
     f2 = SquaredBarcodeLengths(dim=2)
+    if args.bkg == True:
+        cpx_b = init_tri_complex_3d(patch_side, patch_side, patch_side)
+        layer_b = LevelSetLayer(cpx_b, maxdim=2, sublevel=False)
+        fb0 = TopKBarcodeLengths(dim=0, k=feature_size)
+        fb1 = TopKBarcodeLengths(dim=1, k=feature_size)
+        fb2 = TopKBarcodeLengths(dim=2, k=feature_size)
+
     for i in range(batch_size):
         dgminfo = layer(recon_x.view(batch_size, patch_side, patch_side, patch_side)[i])
-        bkginfo = layer((1-recon_x).view(batch_size, patch_side, patch_side, patch_side)[i])
         b01 += ((1 - f01(dgminfo) ** 2)).sum()
         b0 += f0(dgminfo).sum()
         b1 += f1(dgminfo).sum()
         b2 += f2(dgminfo).sum()
-        bb01 += ((1 - f01(bkginfo) ** 2)).sum()
-        bb0 += f0(bkginfo).sum()
+        if args.bkg==True:
+            bkginfo = layer_b((1-recon_x).view(batch_size, patch_side, patch_side, patch_side)[i])
+            bb01 += ((1 - fb0(bkginfo)[0] ** 2)).sum()
+            bb0 += (fb0(bkginfo)[1:] ** 2).sum()
+            bb11 += ((1 - fb1(bkginfo)[0] ** 2)).sum()
+            bb1 += (fb1(bkginfo)[1:] ** 2).sum()
+            bb2 += (fb2(bkginfo) ** 2).sum()
 
     b01 = b01.div(batch_size)
     b0 = b0.div(batch_size)
-    b1 = b1.div(batch_size)
-    b2 = b2.div(batch_size)
-    bb01 = bb01.div(batch_size)
-    bb0 = bb0.div(batch_size)
+    b1 = b1.div(batch_size) * args.alpha
+    b2 = b2.div(batch_size) * args.gamma
+    topo = b01 + b0 + b1 + b2
 
-    topo = b01 + b0 + b1 + b2 + bb01 + bb0
+    if args.bkg==True:
+        bb01 = bb01.div(batch_size)
+        bb0 = bb0.div(batch_size)
+        bb11 = bb11.div(batch_size)
+        bb1 = bb1.div(batch_size)
+        bb2 = bb2.div(batch_size)
 
-    return topo, b01, b0, b1, b2, bb01, bb0
+        bb = bb01 + bb0 + bb11 + bb1 + bb2
+        topo += bb
 
+    if args.bkg == True:
+        return topo, b01, b0, b1, b2, bb01, bb0, bb11, bb1, bb2
+    else:
+        return topo, b01, b0, b1, b2
 
 def train(epoch):
     model.train()
@@ -256,24 +288,34 @@ def train(epoch):
     SE, KLD = 0., 0.
     topo = 0.
     b01, b0, b1, b2 = 0., 0., 0., 0.
-    bb0, bb01 = 0., 0.
+    bb01, bb0, bb11, bb1, bb2 = 0., 0., 0., 0., 0.
     for batch_idx, data in enumerate(train_loader):
         data = data.to(device)
         optimizer.zero_grad()
         recon_batch, mu, logvar = model(data)
         # loss = loss_function(recon_batch, data, mu, logvar)
         if args.mode==2:
-            loss, l01, l0, l1, l2, lb01, lb0 = topological_loss(recon_batch, data)
+            if args.bkg == True:
+                loss, l01, l0, l1, l2, lb01, lb0, lb11, lb1, lb2 = topological_loss(recon_batch, data)
+            else:
+                loss, l01, l0, l1, l2 = topological_loss(recon_batch, data)
             train_loss += loss.item()
             b01 += l01.item()
             b0 += l0.item()
             b1 += l1.item()
             b2 += l2.item()
-            bb01 += lb01.item()
-            bb0 += lb0.item()
+            if args.bkg == True:
+                bb01 += lb01.item()
+                bb0 += lb0.item()
+                bb11 += lb11.item()
+                bb1 += lb1.item()
+                bb2 += lb2.item()
 
         elif args.topo==True:
-            loss, l_SE, l_KLD, l_topo, l01, l0, l1, l2, lb01, lb0 = loss_function(recon_batch, data, mu, logvar)
+            if args.bkg == True:
+               loss, l_SE, l_KLD, l_topo, l01, l0, l1, l2, lb01, lb0, lb11, lb1, lb2 = loss_function(recon_batch, data, mu, logvar)
+            else:
+                loss, l_SE, l_KLD, l_topo, l01, l0, l1, l2 = loss_function(recon_batch, data, mu, logvar)
             train_loss += loss.item()
             SE += l_SE.item()
             KLD += l_KLD.item()
@@ -282,8 +324,12 @@ def train(epoch):
             b0 += l0.item()
             b1 += l1.item()
             b2 += l2.item()
-            bb01 += lb01.item()
-            bb0 += lb0.item()
+            if args.bkg == True:
+                bb01 += lb01.item()
+                bb0 += lb0.item()
+                bb1 += lb1.item()
+                bb1 += lb1.item()
+                bb2 += lb2.item()
 
         else:
             loss, l_SE, l_KLD = loss_function(recon_batch, data, mu, logvar)
@@ -324,31 +370,48 @@ def train(epoch):
         b0 /= len(train_loader.dataset)
         b1 /= len(train_loader.dataset)
         b2 /= len(train_loader.dataset)
-        bb01 /= len(train_loader.dataset)
-        bb0 /= len(train_loader.dataset)
         topo /= len(train_loader.dataset)
+        if args.bkg == True:
+            bb01 /= len(train_loader.dataset)
+            bb0 /= len(train_loader.dataset)
+            bb11 /= len(train_loader.dataset)
+            bb1 /= len(train_loader.dataset)
+            bb2 /= len(train_loader.dataset)
+            writer.add_scalars("loss/topological_loss", {'Topo': topo,
+                                                         'b01': b01,
+                                                         'b0': b0,
+                                                         'b1': b1,
+                                                         'b2': b2,
+                                                         'bb01': bb01,
+                                                         'bb0': bb0,
+                                                         'bb11': bb11,
+                                                         'bb1': bb1,
+                                                         'bb2': bb2}, epoch)
+        else:
+            writer.add_scalars("loss/topological_loss", {'Topo': topo,
+                                                         'b01': b01,
+                                                         'b0': b0,
+                                                         'b1': b1,
+                                                         'b2': b2}, epoch)
 
-        writer.add_scalars("loss/topological_loss", {'Topo': topo,
-                                                     'b01': b01,
-                                                     'b0': b0,
-                                                     'b1': b1,
-                                                     'b2': b2,
-                                                     'bb01': bb01,
-                                                     'bb0': bb0}, epoch)
         writer.add_scalars("loss/each_loss", {'Train': train_loss,
                                               'Rec': SE,
                                               'KL': KLD,
                                               'Topo': topo}, epoch)
 
+        viz.line(X=np.array([epoch]), Y=np.array([topo]), win='each_loss', name='Topo', update='append')
         viz.line(X=np.array([epoch]), Y=np.array([topo]), win='topo_loss', name='topo', update='append',
                  opts=dict(showlegend=True))
         viz.line(X=np.array([epoch]), Y=np.array([b01]), win='topo_loss', name='b01', update='append')
         viz.line(X=np.array([epoch]), Y=np.array([b0]), win='topo_loss', name='b0', update='append')
         viz.line(X=np.array([epoch]), Y=np.array([b1]), win='topo_loss', name='b1', update='append')
         viz.line(X=np.array([epoch]), Y=np.array([b2]), win='topo_loss', name='b2', update='append')
-        viz.line(X=np.array([epoch]), Y=np.array([bb01]), win='topo_loss', name='bb01', update='append')
-        viz.line(X=np.array([epoch]), Y=np.array([bb0]), win='topo_loss', name='bb0', update='append')
-        viz.line(X=np.array([epoch]), Y=np.array([topo]), win='each_loss', name='Topo', update='append')
+        if args.bkg == True:
+            viz.line(X=np.array([epoch]), Y=np.array([bb01]), win='topo_loss', name='bb01', update='append')
+            viz.line(X=np.array([epoch]), Y=np.array([bb0]), win='topo_loss', name='bb0', update='append')
+            viz.line(X=np.array([epoch]), Y=np.array([bb11]), win='topo_loss', name='bb11', update='append')
+            viz.line(X=np.array([epoch]), Y=np.array([bb1]), win='topo_loss', name='bb1', update='append')
+            viz.line(X=np.array([epoch]), Y=np.array([bb2]), win='topo_loss', name='bb2', update='append')
 
     return train_loss
 
@@ -363,7 +426,11 @@ def val(epoch):
             if args.mode == 2:
                 loss, _, _, _, _, _, _ = topological_loss(recon_batch, val_data)
             elif args.topo == True:
-                loss, l_SE, l_KLD, l_topo, l01, l0, l1, l2, lb0, lb1 = loss_function(recon_batch, val_data, mu, logvar)
+                if args.bkg == True:
+                    loss, l_SE, l_KLD, l_topo, l01, l0, l1, l2, lb01, lb0, lb11, lb1, lb2 = loss_function(recon_batch, val_data, mu, logvar)
+                else:
+                    loss, l_SE, l_KLD, l_topo, l01, l0, l1, l2 = loss_function(recon_batch, val_data, mu,
+                                                                                         logvar)
             else:
                 loss, l_SE, l_KLD = loss_function(recon_batch, val_data, mu, logvar)
             val_loss += loss.item()

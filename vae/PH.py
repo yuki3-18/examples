@@ -2,9 +2,11 @@ from utils import *
 import dataIO as io
 import argparse
 import SimpleITK as sitk
+from topologylayer.nn.features import get_start_end
+
 
 parser = argparse.ArgumentParser(description='VAE test')
-parser.add_argument('--input', type=str, default="E:/git/pytorch/vae/results/artificial/hole/z_6/B_0.1/L_60000/gen/",
+parser.add_argument('--input', type=str, default="E:/git/pytorch/vae/results/artificial/hole/z_6/B_0.1/batch128/L_60000/gen/",
                     help='File path of input images')
 parser.add_argument('--patch_side', type=int, default=9,
                     help='how long patch side for input')
@@ -38,13 +40,14 @@ gs_img = np.reshape(io.read_mhd_and_raw(gs_list), [args.patch_side, args.patch_s
 # ori_img = ori_data[args.num_of_data-1:args.num_of_data,:]
 # gs_img = gs_data[args.num_of_data-1:args.num_of_data,:]
 
-dif = np.abs(img-ori_img)
-dif_gs = np.abs(img-gs_img)
+# dif = np.abs(img - ori_img)
+# dif_gs = np.abs(img - gs_img)
 
 # threshold
 # for th in np.linspace()
-img = 1- img
-th = 0.4
+# img = 1 - ori_img
+# img = gs_img
+th = 0.2
 img = (img > th) * 1
 # print(data_set)
 
@@ -59,6 +62,7 @@ display_slices(img.reshape([1, 9, 9, 9]))
 # plot PH diagram
 # compute_Betti_bumbers(data_set[args.num_of_data-1])
 PH_diag(img, args.patch_side)
+print(drawPB(img))
 # save_PH_diag(img, out_path)
 # save_PH_diag(ori_img, out_path+'/ori')
 # save_PH_diag(gs_img, out_path+'/gs')

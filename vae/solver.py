@@ -1,4 +1,7 @@
 from topologylayer.nn.features import *
+from topologylayer.nn.levelset import LevelSetLayer
+from topologylayer.util.construction import unique_simplices
+from scipy.spatial import Delaunay
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -79,3 +82,37 @@ class VAE(nn.Module):
         mu, logvar = self.encode(x.view(-1, 9**3))
         z = self.reparameterize(mu, logvar)
         return self.decode(z), mu, logvar
+
+
+class TopLoss(nn.Module):
+    def __init__(self, size, betti):
+        super(TopLoss, self).__init__()
+        self.size = size
+        self.b0 = betti[0]
+        self.b1 = betti[1]
+        self.b2 = betti[2]
+        self.cpx = self.init_tri_complex_3d(self.size)
+        self.pdfn = LevelSetLayer(self.cpx, maxdim=2, sublevel=False)
+        self.topfn = PartialSumBarcodeLengths(dim=1, skip=1) # penalize more than 1 hole
+        self.topfn2 = SumBarcodeLengths(dim=0) # penalize more than 1 max
+
+    def forward(self, beta):
+        dgminfo = self.pdfn(beta)
+        return self.topfn(dgminfo) + self.topfn2(dgminfo)
+
+    def init_tri_complex_3d(self, size):
+        """
+        initialize 3d complex in dumbest possible way
+        """
+        # initialize complex to use for persistence calculations
+        width, height, depth = size
+        axis_x = np.arange(0, width)
+        axis_y = np.arange(0, height)
+        axis_z = np.arange(0, depth)
+        grid_axes = np.array(np.meshgrid(axis_x, axis_y, axis_z))
+        grid_axes = np.transpose(grid_axes, (1, 2, 3, 0))
+        # creation of a complex for calculations
+        tri = Delaunay(grid_axes.reshape([-1, 3]))
+        return unique_simplices(tri.simplices, 3)
+
+

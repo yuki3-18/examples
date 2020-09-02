@@ -29,14 +29,14 @@ from main import VAE
 parser = argparse.ArgumentParser(description='VAE test')
 parser.add_argument('--input', type=str, default="E:/git/pytorch/vae/input/hole/filename.txt",
                     help='File path of input images')
-parser.add_argument('--model', type=str, default="E:/git/pytorch/vae/results/artificial/hole/z_6/B_0.1/L_30000/weight/246epoch-42.21.pth",
+parser.add_argument('--model', type=str, default="E:/git/pytorch/vae/results/artificial/hole/z_6/B_0.1/L_0/weight/1319epoch-12.1.pth",
                     help='File path of model')
 parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='enables CUDA')
 parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
 parser.add_argument('--constrain', '-c', type=bool, default=False, help='topo con')
-parser.add_argument('--outdir', type=str, default="E:/git/pytorch/vae/results/artificial/hole/z_6/B_0.1/L_30000/gen/",
+parser.add_argument('--outdir', type=str, default="E:/git/pytorch/vae/results/artificial/hole/z_6/B_0.1/L_0/",
                     help='File path of output images')
 parser.add_argument('--mode', type=int, default=0,
                     help='[mode: process] = [0: artificial], [1: real]')
@@ -150,4 +150,6 @@ if __name__ == '__main__':
     model = VAE(latent_dim=6).to(device)
     model.eval()
     model.load_state_dict(torch.load(args.model))
-    gen(model)
+    with open(args.outdir + 'model.pkl', 'wb') as f:
+        cloudpickle.dump(model, f)
+    # gen(model)

@@ -32,14 +32,15 @@ parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='enables CUDA')
 parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
+parser.add_argument('--real', '-r', action='store_true', default=True, help='use_real_image')
 parser.add_argument('--constrain', '-c', action='store_true', default=False, help='topo con')
 parser.add_argument('--PH', '-ph', action='store_true', default=False, help='PH calculation')
-parser.add_argument('--mode', type=int, default=0,
-                    help='[mode: process] = [0: artificial], [1: real]')
+parser.add_argument('--mode', type=int, default=1,
+                    help='[mode: process] = [0: gen], [1: gen&spe], [2: spe]')
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
 
-if args.mode == 0:
+if args.real == True:
     num_of_data = 10000
     num_of_test = 2000
     num_of_val = 2000
@@ -108,6 +109,8 @@ train_data = torch.from_numpy(data[num_of_test+num_of_val:]).float()
 if args.model:
     model = VAE(latent_dim=6).to(device)
     model.load_state_dict(torch.load(args.model))
+    with open(args.outdir + 'model.pkl', 'wb') as f:
+        cloudpickle.dump(model, f)
 else:
     with open(model_path, 'rb') as f:
         model = cloudpickle.load(f)
@@ -118,6 +121,7 @@ def gen(model):
     file_rec = open(os.path.join(gen_rec_path, 'list.txt'), 'w')
     bar01, bar0, bar1, bar2 = [], [], [], []
     bar01_o, bar0_o, bar1_o, bar2_o = [], [], [], []
+    loss01, loss0, loss1, loss2 = [], [], [], []
     score = []
 
     model.eval()
@@ -128,6 +132,8 @@ def gen(model):
         test = test_data.numpy()
         generalization = np.double(np.mean(abs(rec_batch - test), axis=1))
         gen_gs = np.double(np.mean(abs(rec_batch - gs), axis=1))
+        gen_l2 = np.double(np.mean((rec_batch - test)**2, axis=1))
+        gen_gs_l2 = np.double(np.mean((rec_batch - gs)**2, axis=1))
 
         rec_batch = np.reshape(rec_batch,[num_of_test, patch_side, patch_side, patch_side])
         test = np.reshape(test, [num_of_test, patch_side, patch_side, patch_side])
@@ -159,11 +165,19 @@ def gen(model):
                 # bar1_o.append(b1_o.item())
                 # bar2_o.append(b2_o.item())
                 # calculate PH of reconstruction
-                b01, b0, b1, b2 = PH(rec)
+                # b01, b0, b1, b2 = PH(rec)
+                b01, b0, b1, b2, l01, l0, l1, l2 = calc_PH(rec)
+
                 bar01.append(b01.item())
                 bar0.append(b0.item())
                 bar1.append(b1.item())
                 bar2.append(b2.item())
+
+                loss01.append(l01.item())
+                loss0.append(l0.item())
+                loss1.append(l1.item())
+                loss2.append(l2.item())
+
                 # calculate score
                 # s = (1.0 - b01.item()**2) + b0.item()**2 + b1.item()**2 + b2.item()**2
                 # score.append([s])
@@ -189,9 +203,13 @@ def gen(model):
     # transpose bar
     bar = [bar01, bar0, bar1, bar2]
     bar_o = [bar01_o, bar0_o, bar1_o, bar2_o]
+    loss = [loss01, loss0, loss1, loss2]
     if args.PH == True:
         bar = np.transpose(bar)
         bar_o = np.transpose(bar_o)
+        loss = np.transpose(loss)
+        np.savetxt(os.path.join(args.outdir, 'gen_topo_loss_{:.4f}.csv'.format(np.mean(loss))), loss, delimiter=',')
+
         # score = np.array(score).flatten()
         # save_PH_diag(test[i_min], os.path.join(gen_topo_path, 'min', 'ori{}'.format(str(i_min).zfill(4))))
         # save_PH_diag(rec_batch[i_min], os.path.join(gen_topo_path, 'min', 'rec{}'.format(str(i_min).zfill(4))))
@@ -209,17 +227,21 @@ def gen(model):
     visualize_slices(c_X, c_Xe, args.outdir + 'gen/coronal_')
     visualize_slices(s_X, s_Xe, args.outdir + 'gen/sagital_')
     np.savetxt(os.path.join(args.outdir, 'gen_gs_{:.4f}.csv'.format(np.mean(gen_gs))), gen_gs, delimiter=',')
+    np.savetxt(os.path.join(args.outdir, 'gen_l2_{:.4f}.csv'.format(np.mean(gen_l2))), gen_l2, delimiter=',')
+    np.savetxt(os.path.join(args.outdir, 'gen_gs_l2_{:.4f}.csv'.format(np.mean(gen_gs_l2))), gen_gs_l2, delimiter=',')
 
     return generalization, bar, bar_o
 
 
 def spe(model):
-    specificity = []
+    specificity, spe_gs = [], []
+    specificity_l2, spe_gs_l2 = [], []
     bar01, bar0, bar1, bar2 = [], [], [], []
-    score = []
-    sample = []
+    loss01, loss0, loss1, loss2 = [], [], [], []
     id = []
-    spe_gs = []
+    id_l2 = []
+    # score = []
+    # sample = []
 
     model.eval()
     #  calculate mu and sigma
@@ -254,10 +276,15 @@ def spe(model):
 
             specificity_tmp = np.double(np.mean(abs(test - sam_single), axis=1))
             spe_gs_tmp = np.double(np.mean(abs(gs - sam_single), axis=1))
+            specificity_tmp_l2 = np.double(np.mean((test - sam_single)**2, axis=1))
+            spe_gs_tmp_l2 = np.double(np.mean((gs - sam_single)**2, axis=1))
             index = np.argmin(specificity_tmp)
+            idx_l2 = np.argmin(specificity_tmp_l2)
             # index_gs = np.argmax(spe_gs_tmp)
             case_min_specificity = specificity_tmp[index]
             cm_spe_gs = spe_gs_tmp[index]
+            case_min_specificity_l2 = specificity_tmp_l2[idx_l2]
+            cm_spe_gs_l2 = spe_gs_tmp_l2[idx_l2]
 
             # for image_index in range(num_of_test):
             #     specificity_tmp = L1norm(ori[image_index] ,sam)
@@ -269,6 +296,10 @@ def spe(model):
             id.append([index])
             specificity.append([case_min_specificity])
             spe_gs.append([cm_spe_gs])
+
+            id_l2.append([idx_l2])
+            specificity_l2.append([case_min_specificity_l2])
+            spe_gs_l2.append([cm_spe_gs_l2])
 
             # EUDT
             # ori_img = sitk.GetImageFromArray(ori[index])
@@ -287,18 +318,30 @@ def spe(model):
 
             if args.PH == True:
                 # calculate PH
-                b01, b0, b1, b2 = PH(sam)
+                # b01, b0, b1, b2 = PH(sam)
+                b01, b0, b1, b2, l01, l0, l1, l2 = calc_PH(sam)
+
                 bar01.append(b01.item())
                 bar0.append(b0.item())
                 bar1.append(b1.item())
                 bar2.append(b2.item())
+
+                loss01.append(l01.item())
+                loss0.append(l0.item())
+                loss1.append(l1.item())
+                loss2.append(l2.item())
                 # s = (1.0 - b01.item()**2) + b0.item()**2 + b1.item()**2 + b2.item()**2
                 # score.append([s])
     file_spe.close()
 
     bar = [bar01, bar0, bar1, bar2]
+    loss = [loss01, loss0, loss1, loss2]
+
     if args.PH == True:
         bar = np.transpose(bar)
+        loss = np.transpose(loss)
+        np.savetxt(os.path.join(args.outdir, 'spe_topo_loss_{:.4f}.csv'.format(np.mean(loss))), loss, delimiter=',')
+
     #     score = np.array(score).flatten()
     #     id = np.array(id).flatten()
     #     i_min = score.argmin()
@@ -310,6 +353,8 @@ def spe(model):
     #     save_PH_diag(sample[i_max], os.path.join(spe_topo_path, 'max', 'sam{}'.format(str(i_max).zfill(4))))
 
     np.savetxt(os.path.join(args.outdir, 'spe_gs_{:.4f}.csv'.format(np.mean(spe_gs))), spe_gs, delimiter=',')
+    np.savetxt(os.path.join(args.outdir, 'spe_l2_{:.4f}.csv'.format(np.mean(specificity_l2))), specificity_l2, delimiter=',')
+    np.savetxt(os.path.join(args.outdir, 'spe_gs_l2_{:.4f}.csv'.format(np.mean(spe_gs_l2))), spe_gs_l2, delimiter=',')
 
     return specificity, bar
 
@@ -329,26 +374,29 @@ def PH(data):
     b2 = f2(dgminfo)
     return b01, b0, b1, b2
 
+
 if __name__ == '__main__':
 
+    if args.mode <= 1:
     # generalization
-    print('-' * 20, 'Computing Generalization', '-' * 20)
-    generalization, bar, bar_o = gen(model)
-    gen_mean = np.mean(generalization)
-    print('generalization = %f' % gen_mean)
-    np.savetxt(os.path.join(args.outdir, 'generalization_{:.4f}.csv'.format(gen_mean)), generalization, delimiter=',')
-    if args.PH == True:
-        np.savetxt(os.path.join(args.outdir, 'gen_topo.csv'), bar, delimiter=',')
-        # np.savetxt(os.path.join(args.outdir, 'ori_topo.csv'), bar_o, delimiter=',')
+        print('-' * 20, 'Computing Generalization', '-' * 20)
+        generalization, bar, bar_o = gen(model)
+        gen_mean = np.mean(generalization)
+        print('generalization = %f' % gen_mean)
+        np.savetxt(os.path.join(args.outdir, 'generalization_{:.4f}.csv'.format(gen_mean)), generalization, delimiter=',')
+        if args.PH == True:
+            np.savetxt(os.path.join(args.outdir, 'gen_topo.csv'), bar, delimiter=',')
+            # np.savetxt(os.path.join(args.outdir, 'ori_topo.csv'), bar_o, delimiter=',')
 
-    # specificity
-    print('-' * 20, 'Computing Specificity', '-' * 20)
-    specificity, bar = spe(model)
-    spe_mean = np.mean(specificity)
-    print('specificity = %f' % np.mean(spe_mean))
-    np.savetxt(os.path.join(args.outdir, 'specificity_{:.4f}.csv'.format(spe_mean)), specificity, delimiter=',')
-    if args.PH == True:
-        np.savetxt(os.path.join(args.outdir, 'spe_topo.csv'), bar, delimiter=',')
+    if args.mode >= 1:
+        # specificity
+        print('-' * 20, 'Computing Specificity', '-' * 20)
+        specificity, bar = spe(model)
+        spe_mean = np.mean(specificity)
+        print('specificity = %f' % np.mean(spe_mean))
+        np.savetxt(os.path.join(args.outdir, 'specificity_{:.4f}.csv'.format(spe_mean)), specificity, delimiter=',')
+        if args.PH == True:
+            np.savetxt(os.path.join(args.outdir, 'spe_topo.csv'), bar, delimiter=',')
 
     print('-' * 20, 'Finish!', '-' * 20)
 
