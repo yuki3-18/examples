@@ -6,7 +6,7 @@ from topologylayer.nn.features import get_start_end
 
 
 parser = argparse.ArgumentParser(description='VAE test')
-parser.add_argument('--input', type=str, default="E:/git/pytorch/vae/results/artificial/hole/z_6/B_0.1/batch128/L_60000/gen/",
+parser.add_argument('--input', type=str, default="E:/git/pytorch/vae/results/artificial/hole/z_6/B_0.1/batch128/L_60000/C_10/gen/",
                     help='File path of input images')
 parser.add_argument('--patch_side', type=int, default=9,
                     help='how long patch side for input')
@@ -47,8 +47,8 @@ gs_img = np.reshape(io.read_mhd_and_raw(gs_list), [args.patch_side, args.patch_s
 # for th in np.linspace()
 # img = 1 - ori_img
 # img = gs_img
-th = 0.2
-img = (img > th) * 1
+# th = 0.2
+# img = (img > th) * 1
 # print(data_set)
 
 # display image
